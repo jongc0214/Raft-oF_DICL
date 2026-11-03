@@ -206,7 +206,7 @@ case "$TARGET" in
         build_blockcopy_server
         build_node
         build_client
-        build_blkcopy_scale
+        #build_blkcopy_scale
         echo "[build.sh] all binaries in $BUILD_DIR/"
         exit 0
         ;;

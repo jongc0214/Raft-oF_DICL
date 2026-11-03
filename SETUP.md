@@ -119,7 +119,7 @@ E2E_EXPERIMENT.md §5-1). 세 노드 모두 `-mode push`, `-ring-pages` 는 세 
 
 ```bash
 sudo install -d /mnt/raftvol/jongc-push/node4      # 호스트마다 자기 id
-COMMON="-ring-pages 4096 -heartbeat-ms 300 -profile -mode push -statemachine hash -debug"
+COMMON="-ring-pages 65536 -heartbeat-ms 300 -profile -mode push -statemachine hash -debug"
 # -push-devices 경로는 위 "연결 확인" 의 **이 호스트** 줄에서 가져온다 (2026-10-27 기준 값)
 # eternity4
 sudo ./build/raft_node -id 4 -cluster "$CLUSTER" -metadata-dir /mnt/raftvol/jongc-push/node4 $COMMON -push-devices "5=/dev/nvme2n1,6=/dev/nvme3n1"

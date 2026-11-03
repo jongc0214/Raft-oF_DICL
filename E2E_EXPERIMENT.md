@@ -24,16 +24,23 @@
 
 ### 볼륨 — 같은 이름이 호스트마다 다른 것을 가리킨다
 
-| 멤버 | subsystem | 컴퓨트 노드에서의 경로 | **스토리지 노드에서의 경로** |
+| 멤버 | subsystem | 컴퓨트 노드에서의 경로 | **스토리지 노드에서의 경로 (by-id)** |
 |---|---|---|---|
-| id 4 (eternity4) | `node4` | `/dev/nvme1n1` | **`/dev/nvme1n1`** |
-| id 5 (eternity5) | `node5` | `/dev/nvme2n1` | **`/dev/nvme3n1`** |
-| id 6 (eternity6) | `node6` | `/dev/nvme3n1` | **`/dev/nvme5n1`** |
+| id 4 (eternity4) | `node4` | `/dev/nvme1n1` | **`/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509494`** |
+| id 5 (eternity5) | `node5` | `/dev/nvme2n1` | **`/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509496`** |
+| id 6 (eternity6) | `node6` | `/dev/nvme3n1` | **`/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509484`** |
 
-> ⚠ **이 표가 이 문서에서 가장 중요하다.** 컴퓨트 노드의 `/dev/nvme3n1` 은
-> node6 이지만 스토리지 노드의 `/dev/nvme3n1` 은 **node5** 다. 번호가 우연히
-> 겹칠 뿐 의미가 다르다. `-devices` 순서를 잘못 주면 **에러 없이 조용히 엉뚱한
-> 볼륨을 덮어쓴다** — 세 볼륨 전부 실사용 ext4 다.
+스토리지 노드 쪽은 **반드시 by-id 로 적는다.** `/dev/nvmeXnY` 는 커널이 부팅마다
+발견 순서대로 다시 매기는 이름이라 재부팅하면 다른 SSD 를 가리킬 수 있다. 2026-11-03,
+예전 표의 `nvme1n1/3n1/5n1` 로 띄운 blockcopy 서버가 재부팅 뒤 무관한 PM9A3 세 개를
+읽고 쓰고 있었다 — 에러 없이, 팔로워 링에는 아무것도 복제되지 않은 채로. nvmet 의
+`device_path` 가 by-id 라 Raft 쪽은 맞는 볼륨(PM983)에 있었고 blockcopy 만 어긋났다.
+by-id 의 시리얼은 nvmet `device_path` 와 같은 값이어야 한다 (§2 로 확인).
+
+> ⚠ **이 표가 이 문서에서 가장 중요하다.** 같은 `/dev/nvmeXnY` 이름이 컴퓨트
+> 노드와 스토리지 노드에서 서로 다른 볼륨을 가리키고, 스토리지 노드에서는 재부팅마다
+> 바뀌기까지 한다. `-devices` 를 잘못 주면(순서든 이름이든) **에러 없이 조용히 엉뚱한
+> 볼륨을 읽고 덮어쓴다** — 세 볼륨 전부 실사용 ext4 다.
 >
 > 매핑은 반드시 §2 로 확인한다. 외우지 말 것.
 
@@ -253,12 +260,18 @@ CLUSTER="4@10.0.0.4:6001@/dev/nvme1n1@10.0.0.91:5050,\
 
 ### 5-1. 스토리지 노드 먼저 (eternitystorage)
 
-**`-devices` 는 §1 표의 오른쪽 열, 즉 타깃 로컬 경로다.**
+**`-devices` 는 §1 표의 오른쪽 열, 즉 타깃 로컬 by-id 경로다.** 순서는 cluster
+인덱스(4, 5, 6) 순이다. `/dev/nvmeXnY` 이름으로 주지 말 것 (§1 표 아래).
 
 ```bash
 cd ~/raftof_clean
-sudo ./build/raft_blockcopy_server -addr 0.0.0.0:5050 \
-    -devices /dev/nvme1n1,/dev/nvme3n1,/dev/nvme5n1 -copy-workers 8
+sudo ./build/raft_blockcopy_server -addr 0.0.0.0:5050 -copy-workers 8 -devices /dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509494,/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509496,/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509484
+```
+
+시리얼이 nvmet 과 맞는지 먼저 본다 — 아래 세 줄이 위 `-devices` 와 같은 순서·같은 값이어야 한다.
+
+```bash
+for n in node4 node5 node6; do sudo cat /sys/kernel/config/nvmet/subsystems/$n/namespaces/*/device_path; done
 ```
 
 기동 로그에서 `device[0..2]` 세 줄과 `copy-workers : 8` 을 확인한다.
@@ -275,7 +288,7 @@ sudo ./build/raft_node -id 4 -cluster "$CLUSTER" -metadata-dir /mnt/raftvol/node
 
 # eternity5
 sudo ./build/raft_node -id 5 -cluster "$CLUSTER" -metadata-dir /mnt/raftvol/node5 \
-    -ring-pages 4096 -heartbeat-ms 100 -profile
+    -ring-pages 4096 -heartbeat-ms 300 -profile
 
 # eternity6
 sudo ./build/raft_node -id 6 -cluster "$CLUSTER" -metadata-dir /mnt/raftvol/node6 \

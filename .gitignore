@@ -30,3 +30,5 @@ HANDOFF.md
 docs/
 .claude/
 plot/
+csv/
+*.csv

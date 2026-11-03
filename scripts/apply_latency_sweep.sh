@@ -74,9 +74,10 @@
 #
 # ── 한계 ────────────────────────────────────────────────────────────────
 #
-# **RDMA 프레임 상한이 1 MiB 다** (net/include/raft_rdma_transport.h:54).
+# **RDMA 프레임 상한이 4 MiB 다** (net/include/raft_rdma_transport.h:54).
 # ClientApply 요청은 size × batch 바이트를 그대로 싣기 때문에 BATCH 를 올리면
-# 큰 크기가 encode_frame 에서 예외로 죽는다 (128KiB 는 batch 7 이 상한).
+# 큰 크기가 encode_frame 에서 예외로 죽는다 (128KiB 는 batch 31 이 상한).
+# kRdmaMaxMessageBytes 를 다시 바꾸면 RDMA_MAX 환경변수로 맞출 것.
 # preflight 가 걸리는 크기를 목록에서 빼고 경고한다. AppendEntries 는 엔트리당
 # 16B 메타만 보내므로(proto/rpcproto.proto:8-11) 이 제약과 무관하다.
 #
@@ -153,19 +154,19 @@ printf '  n         : %s   batch: %s   reps: %s\n' "$N" "$BATCH" "$REPS"
 printf '  client    : %s\n' "$CLIENT"
 
 # ---------------------------------------------------------------------------
-# preflight A -- RDMA 1 MiB 프레임 상한에 걸리는 크기를 뺀다
+# preflight A -- RDMA 프레임 상한(RDMA_MAX, 기본 4 MiB)에 걸리는 크기를 뺀다
 #
 # ClientApply 요청 본문은 size × batch 바이트에 protobuf 오버헤드(필드당 몇
 # 바이트)와 프레임 헤더가 붙는다. 여유를 조금 두고 자른다. TCP 는 4바이트 길이
 # 필드라 사실상 상한이 없으므로 검사하지 않는다.
 # ---------------------------------------------------------------------------
-RDMA_MAX=$((1024 * 1024))
+RDMA_MAX="${RDMA_MAX:-$((4 * 1024 * 1024))}"
 SWEEP_SIZES=""
 for size in $SIZES; do
     if [ "$TRANSPORT" = "rdma" ]; then
         need=$(( size * BATCH + BATCH * 8 + 64 ))
         if [ "$need" -gt "$RDMA_MAX" ]; then
-            warn "size=$(size_label "$size") × batch=$BATCH = ${need}B > 1MiB RDMA frame -- skipping"
+            warn "size=$(size_label "$size") × batch=$BATCH = ${need}B > RDMA_MAX=${RDMA_MAX}B -- skipping"
             warn "  (이 크기를 보려면 BATCH 를 낮추거나 TRANSPORT=tcp)"
             continue
         fi
@@ -175,7 +176,7 @@ done
 SWEEP_SIZES="${SWEEP_SIZES# }"
 
 if [ -z "$SWEEP_SIZES" ]; then
-    fail "no sizes left to sweep after the 1MiB frame check"
+    fail "no sizes left to sweep after the RDMA frame check"
     exit 1
 fi
 
