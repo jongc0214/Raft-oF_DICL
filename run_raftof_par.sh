@@ -3,7 +3,7 @@ set -euo pipefail
 BATCH="${BATCH:-1}"
 N="${1:?usage: $0 N [payload] [count] [tcp|tcp-ib|rdma]}"
 PAYLOAD="${2:-4096}"
-COUNT="${3:-100}"                         # 프로세스당 측정 명령 수
+COUNT="${3:-10000}"                         # 프로세스당 측정 명령 수
 TRANSPORT_MODE="${4:-rdma}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/env.sh"
@@ -16,7 +16,7 @@ case "$TRANSPORT_MODE" in
   *) echo "bad mode"; exit 1 ;;
 esac
 
-D="$RAFT_ROOT/results/par_$(date +%Y%m%d_%H%M%S)_N${N}_${PAYLOAD}B_${TRANSPORT_MODE}_b${BATCH}"
+D="$RAFT_ROOT/results/1029/par_$(date +%Y%m%d_%H%M%S)_N${N}_${PAYLOAD}B_${TRANSPORT_MODE}_b${BATCH}"
 mkdir -p "$D"
 RC="./build/raft_client -addrs $ADDRS -transport $CLIENT_TRANSPORT"
 

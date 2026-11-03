@@ -144,8 +144,18 @@ public:
      *   상태를 가정한다 (DARE의 모든 서버 쌍이 RC log QP로 연결되어
      *   서로의 로그를 MR로 노출해두는 것과 동일한 토폴로지 가정,
      *   hpdc15dare §3.1.2 "any pair of servers is connected by ... a log
-     *   QP that grants remote access to the local log"). */
-    enum class ReplicationMode { DestinationSide, LeaderSide };
+     *   QP that grants remote access to the local log").
+     * Push (진행 중, DECISIONS.md D20): 리더가 자기 로그를 쓸 때 push 모드
+     *   팔로워의 볼륨에도 직접 쓴다 (리더 호스트가 그 볼륨을 NVMe-oF로
+     *   attach하고 팔로워 extent 맵으로 구한 PBA에 쓴다 --
+     *   persist_circular가 대상별 push 워커에 맡기고 기다리지 않는다).
+     *   그 팔로워의 쓰기와 flush가 끝나면 그 팔로워의 AE 워커만 깨우고,
+     *   AE 배치가 끝난 구간 안이면 data_already_copied를 실어 팔로워가
+     *   pull을 건너뛴다(push_gate). AE는 push 쓰기와 flush가 끝난 뒤에 나가므로
+     *   AE 자체가 "썼다"는 알림이다 -- 따로 OK를 보내지 않는다. 맡긴 적 없는
+     *   배치(맵 받기 전의 no-op, catch-up, push 실패 뒤)는 기본(destination)
+     *   경로로 pull한다. */
+    enum class ReplicationMode { DestinationSide, LeaderSide, Push };
     ReplicationMode replication_mode = ReplicationMode::DestinationSide;
 
     /* --- NVMe-oF Setting --- */
@@ -224,7 +234,13 @@ public:
      * 반환값: nvmeNs -- O_DIRECT WriteAtFile + Fdatasync에 실제로 쓴
      * wall time (실제 NVMe-oF 트래픽). 호출자는 이걸로 in-memory
      * bookkeeping(LeaderMem)과 write+sync(LeaderPersist)를 분리 가능 */
-    int64_t persist_circular(bool write_log, int n_new_entries);
+    int64_t persist_circular(bool write_log, int n_new_entries,
+                             std::shared_ptr<ReplSink> sink = nullptr);
+
+    /* acquire_push_buffer: push job과 공유할 버퍼를 풀(ring.push_bufs)에서
+     * 꺼낸다. 어떤 job도 들고 있지 않은 것을 재사용하고 없으면 새로 만든다.
+     * 돌려주는 버퍼는 크기 0, capacity >= capacity. 호출자가 mu를 보유한다. */
+    std::shared_ptr<AlignedBuffer> acquire_push_buffer(size_t capacity);
 
     /* 디스크 I/O를 mu 밖에서 할 수 있다.
      *  - persist_prepare_locked: mu 보유 중에 호출. 슬롯 할당 + ring.run_buf 인코딩만 하고 I/O는 없다.
@@ -233,9 +249,10 @@ public:
      * (persist_needs_header()로 판정). */
     /* 디스크에 쓸 한 덩어리: ring.run_buf의 [buf_off, buf_off + len)를 디스크 위치 dev_off에 쓴다 */
     struct PersistWrite { int64_t dev_off; size_t buf_off; size_t len; };
-    struct PersistPlan { std::vector<PersistWrite> writes; };
+    struct PersistPlan { std::vector<PersistWrite> writes;
+                         std::shared_ptr<AlignedBuffer> push_buf; };
     bool persist_needs_header();
-    PersistPlan persist_prepare_locked(int n_new_entries);
+    PersistPlan persist_prepare_locked(int n_new_entries, std::shared_ptr<ReplSink> sink = nullptr);
     int64_t persist_io(const PersistPlan &plan);
 
     /* advanceCommitIndex, applyPending, doSlotGC (raft_commit.cpp에서 정의) */
@@ -277,6 +294,10 @@ public:
     ApplyResult apply_timed(const std::vector<std::vector<uint8_t>> &commands,
                              ApplyTimings *out_timings, bool *out_busy = nullptr);
 
+    ApplyResult apply(std::vector<std::vector<uint8_t>> &&commands, bool *out_busy = nullptr);
+    ApplyResult apply_timed(std::vector<std::vector<uint8_t>> &&commands,
+                            ApplyTimings *out_timings, bool *out_busy = nullptr);
+
     /* ============================================================
      * 생명주기 (raft_lifecycle.cpp에서 정의)
      *
@@ -301,13 +322,23 @@ public:
      *   하트비트가 그 경우다). (raft_append_entries.cpp) */
     /* [수정-7] sink는 shared_ptr로 받는다. AE 워커가 호출자보다 오래 살기
      * 때문에 스택 sink는 use-after-return이 된다 -- DECISIONS.md D7 */
-    void append_entries(std::shared_ptr<ReplSink> sink);
+    /* heartbeat: heartbeat()가 부를 때 true. 워커에 하트비트 표시를 세운다. */
+    void append_entries(std::shared_ptr<ReplSink> sink, bool heartbeat = false);
+
+    /* trigger_ae_worker: 팔로워 fi의 AE 워커 **하나만** 깨운다.
+     * append_entries는 이것을 팔로워마다 부르고, push job은 자기 대상이
+     * 끝났을 때 그 대상에 대해서만 부른다 (DECISIONS.md D20).
+     * mu를 잡지 않는다 -- 워커의 자체 락만 잡는다. */
+    void trigger_ae_worker(int fi, std::shared_ptr<ReplSink> sink, bool heartbeat = false);
 
     void append_entries_loop(int fi, AppendEntriesWorkerState *w);
 
     /* append_entries의 팔로워 1명분 처리 로직. 병렬화를 위해 별도
-     * 함수로 분리 -- append_entries가 팔로워마다 스레드를 띄워 이걸 호출 */
-    void append_entries_worker(int fi, ReplSink *sink);
+     * 함수로 분리 -- append_entries가 팔로워마다 스레드를 띄워 이걸 호출.
+     * heartbeat_due: 하트비트 타이머가 깨운 회차인가. push가 아직 쓰는 중이라
+     *   엔트리를 보내지 않는 회차에서, 이것이 true면 빈 AE를 보낸다. */
+    void append_entries_worker(int fi, ReplSink *sink, bool heartbeat_due = false);
+
 
     /* append_entries_worker가 RPC 응답을 받은 뒤 Lock C 안에서 수행하는
      * 기록 갱신. 파일 I/O도 네트워크도 만지지 않는 순수 산술이라 단위
@@ -325,11 +356,97 @@ public:
     PbaRangeResult leader_pba_for_range(uint64_t start_slot, uint64_t total_slots);
 
     /* HandleAppendEntriesRequest, doPBACopy (raft_handle_append_entries.cpp) */
-    struct DoPbaCopyResult { int64_t write_pba_rt_ns; int64_t storage_copy_ns; };
+    struct DoPbaCopyResult {
+        int64_t write_pba_rt_ns;
+        int64_t storage_copy_ns;
+        int64_t storage_read_ns;    /* storage_copy_ns 중 pread 합 */
+        int64_t storage_write_ns;   /* storage_copy_ns 중 pwrite 합 */
+    };
     DoPbaCopyResult do_pba_copy(uint64_t leader_pba_src, uint64_t log_block_length,
                                 uint64_t dst_slot, int src_dev, int dst_dev);
     void handle_append_entries_request(const AppendEntriesRequest &req,
                                         AppendEntriesResponse &rsp);
+
+
+    /* ---- push 모드 (raft_push.cpp, DECISIONS.md D20) ----
+     * is_push_target: 리더가 팔로워 fi의 볼륨에 직접 쓸 대상인가.
+     *   이 노드가 push 모드의 리더이고, fi가 AE 응답에서 push 모드라고
+     *   알렸고(push_map_hash != 0), 이 호스트에 fi 볼륨 장치가 매핑돼
+     *   있고(push_device_path), 받아서 설치한 맵의 해시가 지금 알린 해시와
+     *   같으면 대상이다. 순수 판정이라 단위 테스트가 붙는다
+     *   (tests/test_push_targets.cpp).
+     * push_targets: 대상 전부 (클러스터 인덱스 오름차순).
+     * push_write_targets: 그중 쓰기 실패 후 쉬는 중이 아닌 대상.
+     *   persist_circular가 엔트리를 쓸 때 부른다.
+     * needs_extent_map: fi에게 보내는 AE에 need_extent_map을 실을지.
+     *   맵이 없거나 알린 해시가 설치한 맵과 다르고, 그 해시를 이미
+     *   거절한 적이 없으면 true.
+     * note_push_response: AE 응답의 push_map_hash를 기록하고, 맵이 실려
+     *   왔으면 검증해서 설치한다. append_entries_worker의 Lock C가 부른다.
+     * note_pushed / note_push_failure: persist_circular의 push 쓰기 결과를
+     *   push 범위([push_from, push_upto])와 실패 후 쉬는 시각에 반영한다.
+     * push_covers: 로그 인덱스 [first, last]가 fi의 push 범위에 통째로
+     *   드는가. append_entries_worker가 이 값으로 data_already_copied를
+     *   세운다 -- 하나라도 밖이면 그 배치는 pull한다.
+     *
+     * push 기록 (팔로워마다 한 벌, ClusterMember):
+     *   맡긴 구간 [push_sub_from, push_sub_upto], 끝난 구간 [push_from,
+     *   push_upto], 세대 번호 push_epoch.
+     * reset_push_range: 두 구간을 비우고 세대 번호를 올린다. 구간을 비우는
+     *   모든 곳(해시 변화, 맵 설치, push 실패, become_leader, 자기 쓰기 실패
+     *   롤백)이 이것을 쓴다.
+     * note_push_submitted: persist가 job을 맡길 때 맡긴 구간을 늘린다.
+     * record_push_completion: push job이 끝날 때 부른다. 세대 번호가 다르면
+     *   결과를 버리고 false. 성공이면 note_pushed, 실패면 note_push_failure.
+     * push_gate: AE 워커의 관문 (아래 주석).
+     * finish_push_job: push job의 마지막 단계. mu를 **스스로** 잡고
+     *   record_push_completion을 부른 뒤, mu를 놓고 그 대상의 AE 워커를
+     *   깨운다. 워커 스레드에서 불린다.
+     * 정적 함수인 push_map_reject_reason과 finish_push_job을 뺀 나머지는 전부
+     * **호출자가 mu를 보유**해야 한다. */
+    bool is_push_target(int fi) const;
+    std::vector<int> push_targets() const;
+    std::vector<int> push_write_targets(clock_type::time_point now) const;
+    bool needs_extent_map(int fi) const;
+    bool push_covers(int fi, uint64_t first, uint64_t last) const;
+    void note_push_response(int fi, const AppendEntriesResponse &rsp);
+    void note_pushed(int fi, uint64_t first, uint64_t last);
+    void note_push_failure(int fi, const std::string &what);
+    void reset_push_range(int fi);
+    void note_push_submitted(int fi, uint64_t first, uint64_t last);
+    bool record_push_completion(int fi, uint64_t epoch, uint64_t first, uint64_t last,
+                                const std::string &err);
+    void finish_push_job(int fi, uint64_t epoch, uint64_t first, uint64_t last,
+                         const std::string &err, const std::shared_ptr<ReplSink> &sink);
+    /* push_worker: 팔로워 fi의 push 워커 (없으면 nullptr -- 장치 매핑이 없거나
+     * start() 전). start() 뒤로는 바뀌지 않는다. */
+    IoWorker *push_worker(int fi) const;
+
+    /* push_gate: 팔로워 fi에게 [next, last]를 보내려 할 때의 관문.
+     * next가 fi에게 맡긴 구간(push_sub_from..push_sub_upto -- 쓰는 중이거나
+     * 끝난 엔트리) 안이면 true를 돌려주고, last를 쓰기가 끝난 데(push_upto)까지
+     * 자른다.
+     *   - 잘린 last >= next: 그만큼은 fi 볼륨에 이미 있다 -- data_already_copied로
+     *     보낸다.
+     *   - 잘린 last <  next: 끝났는데 fi가 아직 안 받은 엔트리가 없다. 나머지는
+     *     쓰는 중이므로 보내지 않는다 -- 그 job이 끝나면 이 워커를 다시 깨운다.
+     * false면 last를 건드리지 않고, 지금 동작 그대로 통째로 pull한다: push 대상이
+     * 아니거나, 빈 배치이거나, 맡긴 적 없는 엔트리(기다려도 써 줄 job이 없다).
+     * 한 세대 안에서 job은 이어서 맡겨지고 넣은 순서대로 끝나므로 끝난 구간은
+     * 늘 맡긴 구간의 앞부분이다 -- 그래서 이 한 규칙이 "끝났으면 보내고, 쓰는
+     * 중이면 기다리고, 맡긴 적 없으면 pull"과 같다. */
+    bool push_gate(int fi, uint64_t next, uint64_t &last) const;
+
+    /* push_map_reject_reason: 팔로워에게서 받은 맵을 설치해도 되는가.
+     * 되면 빈 문자열, 아니면 거절 이유. 조건은 (1) 계산한 해시가 팔로워가
+     * 알린 해시와 같고, (2) 맵이 덮는 끝이 이 노드의 링 파일 크기와 같고
+     * (-ring-pages가 다르면 깨진다), (3) 이 호스트에서 매핑한 장치의 wwid와
+     * 팔로워가 보낸 자기 볼륨 wwid가 둘 다 있고 같아야 한다 -- 다르면
+     * -push-devices가 다른 멤버의 볼륨을 가리키고 있는 것이다. 순수 함수다. */
+    static std::string push_map_reject_reason(uint64_t advertised_hash, uint64_t computed_hash,
+                                              uint64_t map_end_bytes, uint64_t ring_file_bytes,
+                                              const std::string &mapped_wwid,
+                                              const std::string &follower_wwid);
 
     /* update_term (raft.go의 updateTerm): msg_term이 우리 term보다 크면
      * 팔로워로 강등하고 term/투표를 갱신한 뒤 헤더를 persist한다.

@@ -108,6 +108,12 @@ struct ApplyTimings {
      *   goraft: follower's s.persist NVMe write+fdatasync wall */
     int64_t storage_io_ns = 0;
 
+    /* StorageIO 를 스토리지 서버가 나눠 보고한 pread / pwrite 합. 진단용이라
+     * 항등식에 들어가지 않는다. StorageIO - (둘의 합) = 서버의 배치 처리 중
+     * 디스크 밖에서 쓴 시간 (워커가 하나일 때). push 된 배치는 0. */
+    int64_t storage_read_ns = 0;
+    int64_t storage_write_ns = 0;
+
     /* QuorumWait = replicate - AE_RT, clamp >= 0. Leader post-AE
      * bookkeeping + apply loop + wg.Wait + commit advance. Equals
      * PostRPC + CommitWait + WgScheduling (within clock granularity). */
@@ -170,6 +176,8 @@ struct ReplSample {
     int64_t r2_ns = 0;            /* follower handler wall (HandlerDuration) */
     int64_t write_pba_rt_ns = 0;  /* follower WritePBA wall (= R2 - FHandler) */
     int64_t storage_copy_ns = 0;  /* S internal pread+pwrite (Replication) */
+    int64_t storage_read_ns = 0;  /* storage_copy_ns 중 pread 합 (destination 만) */
+    int64_t storage_write_ns = 0; /* storage_copy_ns 중 pwrite 합 (destination 만) */
     int64_t mutex_ns = 0;         /* sum of A+B+C lock waits */
     int64_t mutex_b_ns = 0;
     int64_t mutex_c_ns = 0;       /* Lock C wait alone (AE goroutine post-rpcCall) */
@@ -190,6 +198,11 @@ struct ReplSample {
     int64_t handle_ae_post_ns = 0;
     int64_t handle_ae_persist_ns = 0;
     bool leader_side = false;
+    /* push 모드에서 팔로워가 pull을 건너뛴 배치 (DECISIONS.md D20). 이때
+     * write_pba_rt_ns / storage_copy_ns는 push 대기(Lock A 종료 -> 그 팔로워의
+     * push 끝)이고, derive_apply_timings는 Leader-Side와 같은 "AE 전 복사"
+     * 분기로 계산한다. */
+    bool pushed = false;
 };
 
 /* ============================================================
@@ -213,8 +226,20 @@ public:
     std::pair<ReplSample, bool> quorum_sample();
 
     int64_t mutex_a_ns() const { return mutex_a_ns_; }
+
+    /* push 대기 측정 (DECISIONS.md D20).
+     * set_repl_start: Lock A가 끝나는 시각. apply_internal이 mu를 놓기 전에 남긴다.
+     * note_push_end: 팔로워 peer의 push(쓰기 + flush)가 끝난 시각. push job이 남긴다.
+     * push_wait_ns: 그 팔로워의 push가 Lock A 뒤로 삐져나온 시간 (0 이상).
+     *   기준점이나 끝난 시각이 없으면 0. */
+    void set_repl_start(clock_type::time_point t);
+    void note_push_end(int peer, clock_type::time_point t);
+    int64_t push_wait_ns(int peer);
 private:
     std::mutex mu_;
+    bool repl_start_set_ = false;
+    clock_type::time_point repl_start_{};
+    std::vector<std::pair<int, clock_type::time_point>> push_end_;
     std::vector<ReplSample> samples_;
     int64_t mutex_a_ns_ = 0;
     size_t n_followers_;

@@ -30,7 +30,7 @@ case "$TRANSPORT_MODE" in
         ;;
 esac
 
-RESULT_DIR="$RAFT_ROOT/results/1028"
+RESULT_DIR="$RAFT_ROOT/results/1029_4node"
 mkdir -p "$RESULT_DIR"
 "$SCRIPT_DIR/node_cfg.sh" raft_node > "$RESULT_DIR/node_args.txt" 2>&1
 TS="$(date +%Y%m%d_%H%M%S)"

@@ -3,9 +3,11 @@
 #include "raft_basics.h"
 #include "cached_fd.h"   /* CachedFD 역참조 */
 
+#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <cstdio>
+#include <string>
 
 namespace nvmeof_raft {
 
@@ -18,7 +20,13 @@ namespace nvmeof_raft {
  *  Returns nvmeNs: total wall time spent inside O_DIRECT WriteAtFile +
  *  Fdatasync syscalls (the actual NVMe-oF traffic)."
  * ============================================================ */
-int64_t Server::persist_circular(bool write_log, int n_new_entries) {
+int64_t Server::persist_circular(bool write_log, int n_new_entries,
+                                 std::shared_ptr<ReplSink> sink) {
+    /* [push 통합] 이 경로(헤더 쓰기가 필요한 호출)는 push 를 제출하지 않는다.
+     * push 하지 않은 배치는 push_gate 가 false 를 돌려 기존 pull 경로로 가므로
+     * 정확성은 유지되고, 성능 이득만 이 호출에서 빠진다. sink 는 헤더 선언과
+     * 맞추기 위해 받기만 한다. */
+    (void)sink;
     if (n_new_entries == 0 && write_log) {
         n_new_entries = static_cast<int>(raft.log.size()) - 1;
     }
@@ -229,7 +237,8 @@ bool Server::persist_needs_header() {
            get_voted_for() != ring.persisted_voted_for;
 }
 
-Server::PersistPlan Server::persist_prepare_locked(int n_new_entries) {
+Server::PersistPlan Server::persist_prepare_locked(int n_new_entries,
+                                                     std::shared_ptr<ReplSink> sink) {
     PersistPlan plan;
     if (n_new_entries <= 0) {
         return plan;
@@ -245,12 +254,30 @@ Server::PersistPlan Server::persist_prepare_locked(int n_new_entries) {
         est_size += static_cast<size_t>(
             slots_for_entry(raft.log[static_cast<size_t>(k)].command.size())) * SECTOR_SIZE;
     }
-    if (ring.run_buf.capacity() < est_size) {
+    /* [push 통합 1] push 대상과 이번 호출이 쓰는 로그 인덱스 구간.
+     * 아래 루프의 log_idx 와 같은 식이다 (i = start 일 때가 push_first,
+     * 마지막 엔트리가 push_last). prepare 시점에 tail_log_index 는 이미 새
+     * 엔트리를 포함한다. push_write_targets 는 이 노드가 push 모드의 리더가
+     * 아니면 빈 목록을 돌려준다 (팔로워 경로는 영향 없음). */
+    const std::vector<int> push_fis = push_write_targets(clock_type::now());
+    const uint64_t push_first =
+        ring.tail_log_index - static_cast<uint64_t>(raft.log.size() - static_cast<size_t>(start));
+    const uint64_t push_last = ring.tail_log_index - 1;
+
+    /* [push 통합 2] push 대상이 있으면 ring.run_buf 대신 공유 버퍼 풀의 버퍼에
+     * 인코딩한다. push job 은 persist_io 가 끝난 뒤에도 이 버퍼를 읽는데,
+     * ring.run_buf 는 다음 묶음이 곧바로 덮어쓰기 때문이다. 대상이 없으면
+     * 기존과 똑같이 ring.run_buf 를 쓴다 (동작 불변). */
+    std::shared_ptr<AlignedBuffer> push_buf;
+    if (!push_fis.empty()) {
+        push_buf = acquire_push_buffer(est_size);
+    } else if (ring.run_buf.capacity() < est_size) {
         ring.run_buf.resize(est_size, SECTOR_SIZE);
         ring.run_buf.clear();
     }
+    plan.push_buf = push_buf;   /* persist_io 가 어느 버퍼에서 쓸지 알려 준다 */
 
-    AlignedBuffer &run_buffer = ring.run_buf;
+    AlignedBuffer &run_buffer = push_buf ? *push_buf : ring.run_buf;
     run_buffer.clear();
     int64_t write_dev_off = 0;
     size_t write_buf_start = 0;
@@ -328,14 +355,59 @@ Server::PersistPlan Server::persist_prepare_locked(int n_new_entries) {
     }
 
     end_write();
+
+    /* [push 통합 3] 대상마다 job 하나를 맡긴다 (mu 보유 중).
+     * 여기서 시작시켜야 leader 자신의 persist_io (mu 밖, 이 함수 반환 뒤)와
+     * follower 쪽 쓰기가 겹친다. job 은 모든 run 을 쓰고 flush 한 뒤 결과를
+     * 기록하고 그 대상의 AE 워커를 깨운다. 기다리지 않는다.
+     * run 은 plan.writes 와 같은 (논리 오프셋 dev_off, 버퍼 위치 buf_off, 길이)다. */
+    if (push_buf && !plan.writes.empty()) {
+        for (int fi : push_fis) {
+            const size_t i = static_cast<size_t>(fi);
+            IoWorker *w = push_worker(fi);
+            std::shared_ptr<CachedFD> pfd = (i < io.push_fds.size()) ? io.push_fds[i] : nullptr;
+            /* 맡길 때의 세대 번호. 그 사이 구간이 비워지면(롤백, 리더 교체, 링 교체,
+             * 실패) 끝났을 때 결과를 버린다 */
+            const uint64_t epoch = raft.cluster[i].push_epoch;
+            bool queued = false;
+            if (w != nullptr && pfd != nullptr) {
+                std::vector<PersistWrite> runs = plan.writes;   /* job 이 값으로 들고 간다 */
+                queued = w->submit([this, fi, pfd, push_buf, runs, epoch, push_first, push_last, sink]() {
+                    /* IoWorker 스레드, mu 없이. */
+                    std::string err;
+                    try {
+                        for (const PersistWrite &r : runs) {
+                            pfd->write_at_logical(push_buf->data() + r.buf_off, r.len, r.dev_off);
+                        }
+                        /* 블록 장치 flush 까지 끝나야 "팔로워 볼륨에 내구성 있게 있다" */
+                        pfd->fdatasync_device();
+                    } catch (const std::exception &e) {
+                        err = e.what();
+                    }
+                    /* sink: 묶음 대표 요청의 측정 상자. 측정하지 않는 호출은 nullptr.
+                     * push 가 끝난 시각을 여기 남기고 그 대상의 AE 워커를 깨울 때 같은 상자를 넘긴다. */
+                    finish_push_job(fi, epoch, push_first, push_last, err, sink);
+                });
+            }
+            if (queued) {
+                note_push_submitted(fi, push_first, push_last);
+            } else {
+                /* 워커가 없거나 큐가 꽉 찼다 -> 한동안 쉬고 그동안은 pull 로 간다 */
+                note_push_failure(fi, (w == nullptr || pfd == nullptr)
+                                          ? "no push worker" : "push queue full");
+            }
+        }
+    }
     return plan;
 }
 
 int64_t Server::persist_io(const PersistPlan &plan) {
     int64_t nvme_ns = 0;
+    /* prepare 가 push 버퍼에 인코딩했으면 그 버퍼에서, 아니면 ring.run_buf 에서 쓴다 */
+    AlignedBuffer &buf = plan.push_buf ? *plan.push_buf : ring.run_buf;
     for (const PersistWrite &w : plan.writes) {
         auto t_io = clock_type::now();
-        io.cached_fd->write_at_file(ring.run_buf.data() + w.buf_off, w.len, w.dev_off);
+        io.cached_fd->write_at_file(buf.data() + w.buf_off, w.len, w.dev_off);
         nvme_ns += elapsed_ns(t_io);
     }
     if (!plan.writes.empty()) {
@@ -344,6 +416,27 @@ int64_t Server::persist_io(const PersistPlan &plan) {
         nvme_ns += elapsed_ns(t_sync);
     }
     return nvme_ns;
+}
+
+/* [push 통합 4] jongc 에서 그대로 가져온 버퍼 풀 (mu 보유 중 호출) */
+std::shared_ptr<AlignedBuffer> Server::acquire_push_buffer(size_t capacity) {
+    for (auto &b : ring.push_bufs) {
+        /* 풀만 들고 있다 = 이 버퍼를 읽는 push job이 없다 */
+        if (b.use_count() == 1) {
+            /* use_count()는 relaxed로 읽힌다. job이 참조를 놓은 것(release)과
+             * 짝을 맞춰, job의 읽기가 아래 덮어쓰기보다 먼저 끝났음을 보장한다 */
+            std::atomic_thread_fence(std::memory_order_acquire);
+            if (b->capacity() < capacity) {
+                b->resize(capacity, SECTOR_SIZE);
+            }
+            b->clear();
+            return b;
+        }
+    }
+    auto b = std::make_shared<AlignedBuffer>(capacity, SECTOR_SIZE);
+    b->clear();
+    ring.push_bufs.push_back(b);
+    return b;
 }
 
 } /* namespace nvmeof_raft */

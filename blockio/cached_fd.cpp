@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstring>
 #include <cerrno>
+#include <fstream>
 #include <stdexcept>
 #include <cstdlib>
 
@@ -92,6 +93,39 @@ ExtentCache ExtentCache::from_extents(std::vector<Extent> extents) {
               [](const Extent &a, const Extent &b) { return a.logical < b.logical; });
     cache.extents_ = std::move(extents);
     return cache;
+}
+
+/* [push 통합] jongc 에서 그대로 */
+uint64_t ExtentCache::mapping_hash() const {
+    /* FNV-1a 64. 바이트를 리틀엔디언으로 직접 먹여서 호스트와 무관하게 같은
+     * 값이 나오게 한다. */
+    constexpr uint64_t kFnvOffset = 0xcbf29ce484222325ull;
+    constexpr uint64_t kFnvPrime = 0x100000001b3ull;
+    uint64_t h = kFnvOffset;
+    auto feed = [&h](uint64_t v) {
+        for (int i = 0; i < 8; i++) {
+            h ^= (v >> (8 * i)) & 0xffu;
+            h *= kFnvPrime;
+        }
+    };
+
+    /* 논리·물리 주소가 둘 다 이어지는 인접 extent를 하나로 합친 뒤 먹인다 */
+    size_t i = 0;
+    while (i < extents_.size()) {
+        Extent run = extents_[i];
+        size_t j = i + 1;
+        while (j < extents_.size() &&
+               run.logical + static_cast<int64_t>(run.length) == extents_[j].logical &&
+               run.physical + run.length == extents_[j].physical) {
+            run.length += extents_[j].length;
+            j++;
+        }
+        feed(static_cast<uint64_t>(run.logical));
+        feed(run.physical);
+        feed(run.length);
+        i = j;
+    }
+    return h;
 }
 
 PBASegment ExtentCache::lookup(int64_t logical, uint64_t length) const {
@@ -441,6 +475,30 @@ CachedFD CachedFD::open(const std::string &meta_path, const std::string &device_
     return c;
 }
 
+/* [push 통합] jongc 에서 그대로 */
+CachedFD CachedFD::open_device(const std::string &device_path) {
+    CachedFD c;
+
+    c.dev_wr_fd_ = ::open(device_path.c_str(), O_RDWR | O_DIRECT);
+    if (c.dev_wr_fd_ < 0) {
+        throw std::runtime_error("OpenCachedFD(device): open " + device_path + ": " + strerror(errno));
+    }
+
+    struct stat st{};
+    if (::fstat(c.dev_wr_fd_, &st) != 0) {
+        int e = errno;
+        c.close_all();
+        throw std::runtime_error("OpenCachedFD(device): fstat " + device_path + ": " + strerror(e));
+    }
+    if (!S_ISBLK(st.st_mode)) {
+        c.close_all();
+        throw std::runtime_error("OpenCachedFD(device): " + device_path +
+            " is not a block device -- push writes go to raw PBAs, refusing");
+    }
+
+    return c;
+}
+
 CachedFD::~CachedFD() {
     close_all();
 }
@@ -578,5 +636,76 @@ std::vector<uint8_t> CachedFD::read(uint64_t pba, uint64_t nbytes) const {
     free(buf);
     return result;
 }
+
+/* [push 통합] jongc 에서 그대로 (write_at_logical, fdatasync_device, block_device_wwid) */
+void CachedFD::write_at_logical(const void *data, size_t len, int64_t offset) {
+    if (dev_wr_fd_ < 0) {
+        throw std::runtime_error("CachedFD::write_at_logical: no device fd");
+    }
+    if (!has_extent_cache_) {
+        throw std::runtime_error("CachedFD::write_at_logical: no extent map installed");
+    }
+    /* 논리 구간이 물리적으로 여러 extent에 걸치면 extent마다 한 번씩 쓴다.
+     * do_pba_copy가 목적지 범위를 extent 경계에서 자르는 것과 같은 방식이다.
+     * extent 경계는 파일시스템 블록(4KiB) 단위라 쪼갠 조각도 512B 정렬이다. */
+    const uint8_t *p = static_cast<const uint8_t *>(data);
+    size_t done = 0;
+    while (done < len) {
+        int64_t off = offset + static_cast<int64_t>(done);
+        PBASegment seg = extent_cache_.lookup(off, len - done);   /* 맵 밖이면 던진다 */
+        if (seg.len == 0) {
+            throw std::runtime_error("CachedFD::write_at_logical: zero-length segment at " +
+                std::to_string(off));
+        }
+        ssize_t n = ::pwrite(dev_wr_fd_, p + done, static_cast<size_t>(seg.len),
+                             static_cast<off_t>(seg.pba));
+        if (n < 0) {
+            throw std::runtime_error("CachedFD::write_at_logical: pwrite at pba " +
+                std::to_string(seg.pba) + " (" + std::to_string(seg.len) + " bytes): " +
+                strerror(errno));
+        }
+        if (static_cast<uint64_t>(n) != seg.len) {
+            throw std::runtime_error("CachedFD::write_at_logical: short pwrite at pba " +
+                std::to_string(seg.pba) + ": " + std::to_string(n) + "/" +
+                std::to_string(seg.len));
+        }
+        done += static_cast<size_t>(seg.len);
+    }
+}
+
+void CachedFD::fdatasync_device() {
+    if (dev_wr_fd_ < 0) {
+        throw std::runtime_error("CachedFD::fdatasync_device: no device fd");
+    }
+    if (::fdatasync(dev_wr_fd_) != 0) {
+        throw std::runtime_error(std::string("CachedFD::fdatasync_device: ") + strerror(errno));
+    }
+}
+
+std::string block_device_wwid(const std::string &dev_path) {
+    /* /dev/nvmeXnY 는 심볼릭 링크일 수 있으므로(/dev/disk/by-id/... 등)
+     * 실제 장치 이름을 먼저 구한다 */
+    char *real = ::realpath(dev_path.c_str(), nullptr);
+    if (real == nullptr) {
+        return "";
+    }
+    std::string name(real);
+    free(real);
+    size_t slash = name.find_last_of('/');
+    if (slash != std::string::npos) {
+        name = name.substr(slash + 1);
+    }
+
+    std::ifstream in("/sys/class/block/" + name + "/wwid");
+    std::string wwid;
+    if (!in || !std::getline(in, wwid)) {
+        return "";
+    }
+    while (!wwid.empty() && (wwid.back() == ' ' || wwid.back() == '\n' || wwid.back() == '\r')) {
+        wwid.pop_back();
+    }
+    return wwid;
+}
+
 
 } /* namespace nvmeof_raft */

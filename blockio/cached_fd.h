@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <stdexcept>
+#include <utility>
 
 namespace nvmeof_raft {
 
@@ -90,6 +91,12 @@ public:
      *  when offsets advance sequentially." */
     std::pair<uint64_t, int> remaining_at(int64_t logical, int hint) const;
 
+    /* [Push Integration] mapping_hash: "논리 오프셋 -> 물리 주소" 매핑의 해시 (FNV-1a 64).
+     * push 모드에서 리더가 받아 둔 팔로워 맵이 아직 유효한지 확인하는 데 쓴다. */
+    uint64_t mapping_hash() const;
+    /* [Push Integration] 담고 있는 extent 목록 (logical 오름차순). 팔로워가 자기 맵을 리더에게 보낼 때 쓴다. */
+    const std::vector<Extent> &extents() const { return extents_; }
+
 private:
     std::vector<Extent> extents_;   /* logical 오름차순 정렬됨 */
 };
@@ -156,6 +163,19 @@ public:
         return extent_cache_.remaining_at(logical, hint);
     }
 
+    /* [Push Integration] push 모드용. open_device 로 만든 인스턴스는 블록 장치 fd 만 갖고
+     * (링 파일 없음), 팔로워에게서 받은 extent 맵을 set_extents 로 받아 쓴다. */
+    static CachedFD open_device(const std::string &device_path);
+    uint64_t extent_map_hash() const { return has_extent_cache_ ? extent_cache_.mapping_hash() : 0; }
+    std::vector<Extent> extents() const {
+        return has_extent_cache_ ? extent_cache_.extents() : std::vector<Extent>{};
+    }
+    void set_extents(ExtentCache cache) { extent_cache_ = std::move(cache); has_extent_cache_ = true; }
+    /* 링 파일의 논리 오프셋을 이 인스턴스의 extent 맵으로 물리 주소로 바꿔 장치에 쓴다 */
+    void write_at_logical(const void *data, size_t len, int64_t offset);
+    /* 블록 장치 fd 의 fdatasync (장치 캐시 flush) */
+    void fdatasync_device();
+
     /* GetPBA (raft.go 원본)
      * "retrieves the physical block address for a logical offset. Uses
      *  the cached extent map if available (O(log n) binary search),
@@ -188,6 +208,9 @@ private:
 
     void close_all();
 };
+
+/* [Push Integration] 블록 장치의 wwid (/sys/class/block/<name>/wwid). 못 읽으면 빈 문자열. */
+std::string block_device_wwid(const std::string &dev_path);
 
 } /* namespace nvmeof_raft */
 

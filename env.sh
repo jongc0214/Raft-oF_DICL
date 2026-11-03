@@ -18,7 +18,7 @@ export RAFT_ROOT="$SCRIPT_DIR"
 #    -devices 인덱스를 정한다 (순서가 다르면 엉뚱한 볼륨에 쓴다).
 #
 POOL=(
-    "1|10.0.0.1:6000|115.145.173.242:6000|/dev/nvme1n1|/dev/nvme7n1"
+    "1|10.0.0.1:6000|115.145.173.242:6000|/dev/nvme1n2|/dev/nvme7n1"
     "2|10.0.0.2:6000|115.145.173.244:6000|/dev/nvme1n1|/dev/nvme8n1"      # IPoIB 케이블 비정상 -> tcp(Ethernet)만
     "3|10.0.0.3:6000|115.145.173.245:6000|/dev/nvme1n1|/dev/nvme0n1"      # IPoIB 케이블 비정상 -> tcp(Ethernet)만
     "4|10.0.0.4:6000|115.145.173.123:6000|/dev/nvme1n1|/dev/nvme1n1"
@@ -38,12 +38,14 @@ POOL=(
 #   NODES="1 2 4 5 6" ./start_node.sh ...      직접 지정 (순서 = cluster 순서)
 #   TOPO=5 ./start_node.sh ...                 프리셋 (1 2 4 5 6)
 TOPO_3_NODES="${TOPO_3_NODES:-4 5 6}"
+TOPO_4_NODES="${TOPO_4_NODES:-1 4 5 6}"
 TOPO_5_NODES="${TOPO_5_NODES:-1 2 4 5 6}"
 if [[ -z "${NODES:-}" ]]; then
     case "${TOPO:-3}" in
         3) NODES="$TOPO_3_NODES" ;;
+        4) NODES="$TOPO_4_NODES" ;;
         5) NODES="$TOPO_5_NODES" ;;
-        *) echo "invalid TOPO: ${TOPO} (3|5)" >&2; return 1 2>/dev/null || exit 1 ;;
+        *) echo "invalid TOPO: ${TOPO} (3|4|5)" >&2; return 1 2>/dev/null || exit 1 ;;
     esac
 fi
 export NODES

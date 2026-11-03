@@ -65,7 +65,7 @@ constexpr int kResultWaitMs = 200;
 } /* anonymous namespace */
 
 struct GcReq {
-    const std::vector<std::vector<uint8_t>> *commands;
+    std::vector<std::vector<uint8_t>> *commands;
     std::shared_ptr<ApplyCollector> collector;
     std::shared_ptr<EntryCommitSignal> last_signal;
 
@@ -85,7 +85,8 @@ struct GcReq {
 };
 
 static void commit_batch_locked(Server *s, std::unique_lock<std::mutex> &lk, 
-                                std::vector<GcReq *> &batch, clock_type::time_point t_a_held) {
+                                std::vector<GcReq *> &batch, clock_type::time_point t_a_held,
+                                const std::shared_ptr<ReplSink> &sink) {
     auto fail = [&](const std::string &err, bool busy) {
         for (GcReq *r : batch) { 
             r->error = err;
@@ -141,13 +142,13 @@ static void commit_batch_locked(Server *s, std::unique_lock<std::mutex> &lk,
 
     size_t total_n = 0;
     for (GcReq *r : batch) {
-        const auto &cmds = *r->commands;
+        auto &cmds = *r->commands;
         const size_t n = cmds.size();
         auto collector = r->collector;
         for (size_t i = 0; i < n; i++) {
             Entry e;
             e.term = s->raft.current_term;
-            e.command = cmds[i];
+            e.command = std::move(cmds[i]);
             bool is_last = (i + 1 == n);
             e.result_sink = [collector, is_last](ApplyResult res) {
                 {
@@ -198,6 +199,13 @@ static void commit_batch_locked(Server *s, std::unique_lock<std::mutex> &lk,
             idx < saved_tail_log_index + total_n; idx++) {
             s->ring.log_slot_map.erase(idx);                         // 보강: 낡은 기록 삭제
         }
+        /* [Push Integration] push 모드: 이 엔트리들의 push job 은 이미 맡겼을 수 있다.
+         * push 구간을 비우고 세대 번호를 올려, 늦게 끝난 job 이 되돌린 엔트리(같은 인덱스에
+         * 곧 다른 명령이 들어온다)를 "끝났다"고 적지 못하게 한다. job 이 쓴 바이트는
+         * 팔로워의 tail 밖 슬롯이라 무해하다. */
+        for (size_t i = 0; i < s->raft.cluster.size(); i++) {
+            s->reset_push_range(static_cast<int>(i));
+        }
     };
 
     int64_t nvme_ns = 0;
@@ -210,7 +218,7 @@ static void commit_batch_locked(Server *s, std::unique_lock<std::mutex> &lk,
         s->persist_inflight = true;
         s->ring.durable_floor = saved_tail_log_index - 1;
         try {
-            plan = s->persist_prepare_locked(static_cast<int>(total_n));
+            plan = s->persist_prepare_locked(static_cast<int>(total_n), sink);
         } catch (const std::exception &e) {
             io_err = e.what();
         }
@@ -235,7 +243,7 @@ static void commit_batch_locked(Server *s, std::unique_lock<std::mutex> &lk,
     } else {
         /* 헤더 쓰기가 필요한 호출(term/vote 변경 후 첫 묶음 등)은 기존처럼 mu 안에서 동기 처리한다 */
         try {
-            nvme_ns = s->persist_circular(true, static_cast<int>(total_n));
+            nvme_ns = s->persist_circular(true, static_cast<int>(total_n), sink);
         } catch (const std::exception &e) {
             rollback();
             fail(std::string("persist failed: ") + e.what(), false);
@@ -307,7 +315,7 @@ static void gc_publish(Server *s, std::vector<GcReq *> &batch, GcReq *self) {
  * timings != nullptr이면 ReplSink를 붙여 구간을 분해한다.
  * ============================================================ */
 static ApplyResult apply_internal(Server *s,
-                                   const std::vector<std::vector<uint8_t>> &commands,
+                                   std::vector<std::vector<uint8_t>> &commands,
                                    ApplyTimings *timings,
                                    bool *out_busy) {
     ApplyResult out;
@@ -392,7 +400,7 @@ static ApplyResult apply_internal(Server *s,
             }
         }
         try {
-            commit_batch_locked(s, lk, batch, t_a_held);
+            commit_batch_locked(s, lk, batch, t_a_held, sink);
         } catch (const std::exception &e) {
             for (GcReq *r : batch) {
                 if (r->error.empty()) {
@@ -400,6 +408,13 @@ static ApplyResult apply_internal(Server *s,
                 }
             }
         }
+        /* [Push Integration] push 대기의 기준점. mu 를 놓기 **전에** 남긴다. push 가 이
+         * 시각 전에 끝났으면 대기는 0 이다. 묶음에 요청이 여러 개면 대표의 sink 에만
+         * 기록된다 (C=1 측정에서는 요청 하나가 곧 대표다). */
+        if (sink != nullptr) {
+            sink->set_repl_start(clock_type::now());
+        }
+
         lk.unlock();
         gc_publish(s, batch, &req);
     } else {
@@ -497,12 +512,26 @@ static ApplyResult apply_internal(Server *s,
     return out;
 }
 
-ApplyResult Server::apply(const std::vector<std::vector<uint8_t>> &commands,
-                           bool *out_busy) {
+ApplyResult Server::apply(const std::vector<std::vector<uint8_t>> &commands, bool *out_busy) {
+    std::vector<std::vector<uint8_t>> own(commands);
+    return apply_internal(this, own, nullptr, out_busy);
+}
+ApplyResult Server::apply(std::vector<std::vector<uint8_t>> &&commands, bool *out_busy) {
     return apply_internal(this, commands, nullptr, out_busy);
 }
 
 ApplyResult Server::apply_timed(const std::vector<std::vector<uint8_t>> &commands,
+                                 ApplyTimings *out_timings, bool *out_busy) {
+    std::vector<std::vector<uint8_t>> own(commands);
+    ApplyTimings local;
+    ApplyTimings *target = (out_timings != nullptr) ? out_timings : &local;
+    auto t0 = clock_type::now();
+    ApplyResult r = apply_internal(this, own, target, out_busy);
+    target->total_ns = elapsed_ns(t0);
+    return r;
+}
+
+ApplyResult Server::apply_timed(std::vector<std::vector<uint8_t>> &&commands,
                                  ApplyTimings *out_timings, bool *out_busy) {
     ApplyTimings local;
     ApplyTimings *target = (out_timings != nullptr) ? out_timings : &local;

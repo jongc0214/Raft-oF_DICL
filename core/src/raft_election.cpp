@@ -173,6 +173,19 @@ void Server::become_leader() {
     if (quorum == 0) {
         raft.state = ServerState::Leader;
 
+        /* [Push Integration]
+         * 이전 리더십 때 알던 팔로워 상태는
+         * 믿지 않는다 -- 그 사이 팔로워가 다른 링 파일로 재시작했을 수 있다.
+         * 알린 해시와 push 구간을 지우고 이번 term의 첫 응답으로 다시 안다.
+         * **아래 no-op을 쓰기 전에** 지워야 그 no-op이 낡은 정보로 push되지
+         * 않는다 (no-op은 pull로 간다). 세대 번호도 올라가므로 이전 리더십
+         * 때 맡긴 push job이 늦게 끝나도 결과는 버려진다. 받아 둔 맵 캐시
+         * (push_map_cached_hash)는 지우지 않는다 -- 해시가 같으면 재사용한다. */
+        for (size_t i = 0; i < raft.cluster.size(); i++) {
+            raft.cluster[i].push_map_hash = 0;
+            reset_push_range(static_cast<int>(i));
+        }
+
         /* "Preserve logSlotMap across the role transition... Rebuild
          *  slotStates from the surviving map so canWriteAll still
          *  respects occupancy." */
@@ -256,7 +269,7 @@ void Server::heartbeat() {
      * 리더는 timeout()을 아예 호출하지 않으므로 election_timeout이
      * 만료돼도 강등되지 않는다. */
     mu.unlock();
-    append_entries(nullptr);
+    append_entries(nullptr, true);
 }
 
 /* ============================================================

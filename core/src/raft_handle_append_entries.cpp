@@ -28,7 +28,7 @@ Server::DoPbaCopyResult Server::do_pba_copy(uint64_t leader_pba_src,
                                              uint64_t dst_slot,
                                              int src_dev, int dst_dev) {
     if (leader_pba_src == 0 || log_block_length == 0) {
-        return {0, 0};
+        return {0, 0, 0, 0};
     }
 
     /* 스토리지 노드로의 연결과 그 재시도(lazy connect)는 BlockCopyClient
@@ -99,9 +99,12 @@ Server::DoPbaCopyResult Server::do_pba_copy(uint64_t leader_pba_src,
     /* Pass 2: 배치 RPC 발사 (단일 배치 호출로 전체 청크 목록 전달) */
     auto t_rpc = clock_type::now();
     int64_t storage_copy_ns = 0;
+    int64_t storage_read_ns = 0;
+    int64_t storage_write_ns = 0;
     std::string bc_error;
     if (!blockcopy->write_pba_batch(pba_srcs, pba_dsts, chunk_nbytes,
-                                     src_dev, dst_dev, &storage_copy_ns, &bc_error)) {
+                                     src_dev, dst_dev, &storage_copy_ns, 
+                                     &storage_read_ns, &storage_write_ns, &bc_error)) {
         /* 예전에는 구현체가 예외를 던졌다. 인터페이스는 bool을 쓰되 core
          * 내부의 제어 흐름은 그대로 둔다 -- 호출부
          * (handle_append_entries_request / append_entries_worker)가 예외를
@@ -110,7 +113,7 @@ Server::DoPbaCopyResult Server::do_pba_copy(uint64_t leader_pba_src,
     }
     int64_t write_pba_rt_ns = elapsed_ns(t_rpc);
 
-    return {write_pba_rt_ns, storage_copy_ns};
+    return {write_pba_rt_ns, storage_copy_ns, storage_read_ns, storage_write_ns};
 }
 
 /* ============================================================
@@ -143,6 +146,15 @@ void Server::handle_append_entries_request(const AppendEntriesRequest &req,
         rsp.handle_ae_lock_wait2_ns = handle_ae_lock_wait2;
         rsp.handle_ae_post_ns = handle_ae_post;
         rsp.handle_ae_persist_ns = handle_ae_persist;
+        /* [Push Integration] push 후보 알림 -- 모든 반환 경로(거절 포함)가 여기를 지난다.
+         * io.ring_map_hash 는 init_storage 이후 바뀌지 않으므로 mu 밖에서 읽어도 된다. */
+        rsp.push_map_hash = (replication_mode == ReplicationMode::Push) ? io.ring_map_hash : 0;
+        /* 리더가 맵을 달라고 했으면 자기 링 extent 목록과 볼륨 wwid 를 싣는다.
+         * 둘 다 init_storage 이후 바뀌지 않는다. */
+        if (req.need_extent_map && replication_mode == ReplicationMode::Push) {
+            rsp.extent_map = io.ring_extents;
+            rsp.volume_wwid = io.own_wwid;
+        }
     };
 
     update_term(req.rpc.term);
@@ -251,6 +263,8 @@ void Server::handle_append_entries_request(const AppendEntriesRequest &req,
 
         rsp.write_pba_rt_ns = copy_result.write_pba_rt_ns;
         rsp.storage_copy_ns = copy_result.storage_copy_ns;
+        rsp.storage_read_ns = copy_result.storage_read_ns;
+        rsp.storage_write_ns = copy_result.storage_write_ns;
         if (copy_failed) {
             finalize();
             return;

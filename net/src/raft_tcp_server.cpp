@@ -8,6 +8,7 @@
 
 #include <string>
 #include <vector>
+#include <utility>
 
 /* net/include/raft_tcp_server.h 의 구현. 선언은 그 헤더를 볼 것.
  *
@@ -38,7 +39,7 @@ bool dispatch_client_method(const std::string &method,
 
         bool busy = false;
         const auto apply_t0 = std::chrono::steady_clock::now();
-        ApplyResult res = server->apply(req.commands, &busy);
+        ApplyResult res = server->apply(std::move(req.commands), &busy);
         const int64_t apply_ns =
             std::chrono::duration_cast<std::chrono::nanoseconds>(
                 std::chrono::steady_clock::now() - apply_t0).count();
@@ -63,7 +64,7 @@ bool dispatch_client_method(const std::string &method,
 
         bool busy = false;
         ApplyTimings t;
-        ApplyResult res = server->apply_timed(req.commands, &t, &busy);
+        ApplyResult res = server->apply_timed(std::move(req.commands), &t, &busy);
 
         ClientApplyTimedResponse rsp;
         rsp.error = res.error;

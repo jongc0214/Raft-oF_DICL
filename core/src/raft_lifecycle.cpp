@@ -33,6 +33,18 @@ namespace {
 constexpr int kApplyWorkerPollMs = 50;
 constexpr int kSlotGcWorkerPollMs = 100;
 
+/* [Push Integration] */
+/* push 워커 (raft_io_worker.h, DECISIONS.md D20).
+ * kPushIoSpinUs: 일을 마친 뒤 잠들기 전에 큐를 돌며 기다리는 시간. cv 깨우기
+ *   지연이 NVMe-oF 쓰기 한 번과 같은 규모라 둔다. 한 클라이언트가 하나씩 보내는
+ *   closed loop에서도 Apply 사이에 잠들지 않을 만큼이다. 비용은 대상마다 코어
+ *   하나이고, 일이 이어지는 동안만 쓴다.
+ * kPushIoMaxQueue: 대상마다 쌓아 둘 수 있는 job 수. 넘치면 그 대상은 너무
+ *   뒤처졌거나 멈춘 것이므로 1초 쉬고 pull로 간다. */
+constexpr int kPushIoSpinUs = 1000;
+constexpr size_t kPushIoMaxQueue = 16;
+
+
 /* 메타데이터 디렉터리 생성 모드 (링 파일 자체는 0644 -- raft_cached_fd.cpp) */
 constexpr int kMetadataDirMode = 0755;
 void ensure_dir(const std::string &path) {
@@ -131,6 +143,37 @@ void Server::init_storage() {
      * 그 필드를 읽는 코드가 하나도 없었다.) */
     (void)io.cached_fd->get_pba(0, HEADER_SIZE);
 
+    /* [Push Integration] */
+    /* ---- push 모드 (DECISIONS.md D20) ----
+     * 팔로워 역할 준비: 자기 링의 맵 해시(AE 응답의 push_map_hash로 리더에게
+     * 알린다), extent 목록과 볼륨 wwid(리더가 need_extent_map으로 요청하면
+     * 응답에 싣는다)를 만들어 둔다. 링 파일은 기동 후 바뀌지 않으므로 한 번만.
+     * 리더 역할 준비: 이 호스트에 매핑된 다른 멤버 볼륨을 열고 wwid를 읽는다.
+     * 하나라도 못 열면 기동을 멈춘다 -- 그 팔로워가 조용히 pull로 떨어지는
+     * 것보다 설정 실수를 바로 드러내는 편이 낫다. */
+    if (replication_mode == ReplicationMode::Push) {
+        io.ring_map_hash = io.cached_fd->extent_map_hash();
+        if (io.ring_map_hash == 0) {
+            io.ring_map_hash = 1;   /* 0은 "push 모드가 아니다"라는 뜻이라 피한다 */
+        }
+        io.ring_extents = io.cached_fd->extents();
+        io.own_wwid = block_device_wwid(io.device_path);
+        io.push_fds.assign(raft.cluster.size(), nullptr);
+        for (size_t i = 0; i < raft.cluster.size(); i++) {
+            const std::string &dev = raft.cluster[i].push_device_path;
+            if (static_cast<int>(i) == raft.cluster_index || dev.empty()) {
+                continue;
+            }
+            try {
+                io.push_fds[i] = std::make_shared<CachedFD>(CachedFD::open_device(dev));
+            } catch (const std::exception &e) {
+                throw std::runtime_error("init_storage: -push-devices entry for member id=" +
+                    std::to_string(raft.cluster[i].id) + ": " + e.what());
+            }
+            raft.cluster[i].push_device_wwid = block_device_wwid(dev);
+        }
+    }
+
     /* ---- 로그/슬롯 초기화 ---- */
     raft.log.clear();
     raft.log.push_back(Entry{});   /* sentinel: term 0, command 비어있음 */
@@ -186,9 +229,9 @@ void Server::start() {
     workers.started = true;
     done.store(false);
 
-    workers.main_thread = std::thread([this]() { main_loop(); });
-    workers.apply_thread = std::thread([this]() { apply_worker_loop(); });
-    workers.slot_gc_thread = std::thread([this]() { slot_gc_worker_loop(); });
+    /* [Push Integration] 팔로워별 워커(AE, push)를 **main_thread 보다 먼저** 만든다.
+     * main_loop 의 heartbeat() -> append_entries() 가 ae_workers[i] 를, persist 경로가
+     * push_io[i] 를 바로 읽으므로, 스레드를 먼저 띄운 뒤 이 벡터들을 resize 하면 경쟁이 된다. */
 
     // [Persistent Worker]
     // Create Persistent Worker for other nodes per node
@@ -210,6 +253,22 @@ void Server::start() {
         workers.ae_workers[i] = std::move(w);
     }
     // [Persistent Worker]
+
+    /* [Push Integration] push 워커: 이 호스트에 장치가 매핑된 멤버마다 하나.
+     * 그 멤버가 실제 push 대상인지는 실행 중에 정해지고, 일이 오지 않는 워커는 잠들어 있다. */
+    workers.push_io.clear();
+    workers.push_io.resize(raft.cluster.size());
+    for (size_t i = 0; i < io.push_fds.size() && i < raft.cluster.size(); i++) {
+        if (io.push_fds[i]) {
+            auto pw = std::make_unique<IoWorker>();
+            pw->start(kPushIoSpinUs, kPushIoMaxQueue);
+            workers.push_io[i] = std::move(pw);
+        }
+    }
+
+    workers.main_thread = std::thread([this]() { main_loop(); });
+    workers.apply_thread = std::thread([this]() { apply_worker_loop(); });
+    workers.slot_gc_thread = std::thread([this]() { slot_gc_worker_loop(); });
 }
 
 void Server::stop() {
@@ -238,6 +297,15 @@ void Server::stop() {
     {
         std::lock_guard<std::mutex> lk(mu);
         ring_not_full.notify_all();
+    }
+
+    /* [Push Integration] push 워커를 AE 워커보다 먼저 멈춘다. 받아 둔 job 은 끝까지 돌리는데,
+     * job 은 끝에서 mu 를 잡고 기록한다(done 이라 AE 워커는 깨우지 않는다).
+     * 여기서는 mu 를 쥐고 있지 않으므로 막히지 않는다. */
+    for (auto &pw : workers.push_io) {
+        if (pw) {
+            pw->stop();
+        }
     }
 
     if (workers.main_thread.joinable()) {

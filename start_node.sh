@@ -17,9 +17,8 @@ if [[ $# -lt 1 || $# -gt 4 ]]; then
 fi
 
 ID="$1"
-VER="${2:-old}"
-MODE="${3:-destination}"
-TRANSPORT_MODE="${4:-rdma}"
+MODE="${2:-destination}"
+TRANSPORT_MODE="${3:-rdma}"
 
 is_valid_id "$ID" || {
     echo "invalid node id: $ID"
@@ -27,19 +26,11 @@ is_valid_id "$ID" || {
     exit 1
 }
 
-case "$VER" in
-    old|pw) ;;
-    *)
-        echo "invalid ver: $VER"
-        exit 1
-        ;;
-esac
-
 case "$MODE" in
-    destination|leader) ;;
+    destination|leader|push) ;;
     *)
         echo "invalid mode: $MODE"
-        echo "valid modes: destination, leader"
+        echo "valid modes: destination, leader, push"
         exit 1
         ;;
 esac
@@ -59,6 +50,16 @@ case "$TRANSPORT_MODE" in
         select_transport_env tcp
         ;;
 esac
+
+case "$ID" in
+    4) PUSH_DEVICES="${PUSH_DEVICES:-5=/dev/nvme2n1,6=/dev/nvme3n1}" ;;
+    5) PUSH_DEVICES="${PUSH_DEVICES:-4=/dev/nvme2n1,6=/dev/nvme3n1}" ;;
+    6) PUSH_DEVICES="${PUSH_DEVICES:-4=/dev/nvme2n1,5=/dev/nvme3n1}" ;;
+esac
+PUSH_ARGS=()
+if [[ "$MODE" == "push" && -n "$PUSH_DEVICES" ]]; then
+    PUSH_ARGS+=(-push-devices "$PUSH_DEVICES")
+fi
 
 select_transport_env "$TRANSPORT"
 
@@ -117,6 +118,7 @@ sudo stdbuf -oL -eL ./build/raft_node \
     -mode "$MODE" \
     -ring-pages "$RING_PAGES" \
     "${PRECONDITION_ARGS[@]}" \
+    "${PUSH_ARGS[@]}" \
     -heartbeat-ms "$HEARTBEAT_MS" \
     -loop-sleep-us 200 \
     -ae-batch 256 \

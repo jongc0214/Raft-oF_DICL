@@ -18,6 +18,7 @@
 
 #include "raft_constants.h"
 #include "raft_entry.h"
+#include "raft_io_worker.h"   /* WorkerPool::push_io */
 
 using clock_type = std::chrono::steady_clock;
 
@@ -105,6 +106,55 @@ struct ClusterMember {
      * 경고는 1초에 한 번만 낸다. */
     uint64_t skip_pba_last_next = UINT64_MAX;
     std::chrono::steady_clock::time_point skip_pba_last_log{};
+
+    /* ---- push 모드 (DECISIONS.md D20) ----
+     * push_device_path: **이 호스트에서 본** 이 멤버 볼륨의 블록 장치 경로
+     *   (-push-devices). 리더가 되면 여기에 직접 쓴다. 같은 볼륨이라도
+     *   호스트마다 장치 이름이 다르므로 device_path(그 멤버 자신의 경로)와
+     *   별개다. 자기 자신과 매핑하지 않은 멤버는 비어 있다.
+     * push_map_hash: 이 팔로워가 AE 응답에서 알린 값 (리더 시점).
+     *   0 = push 모드가 아니거나 이번 term 에 아직 응답을 못 받았다.
+     *   그 밖의 값 = push 모드이고, 그 팔로워 링의 extent 맵 해시다.
+     * push_nodev_warned: "push 모드인데 이 호스트에 장치 매핑이 없다"
+     *   경고를 한 번만 내기 위한 스로틀.
+     * push_device_wwid: push_device_path 장치의 wwid (init_storage). 팔로워가
+     *   맵과 함께 보내는 자기 볼륨 wwid와 같아야 맵을 설치한다.
+     * push_map_cached_hash: 받아서 설치한 이 팔로워 맵의 해시 (0 = 없음).
+     *   **선거가 바뀌어도 유지한다** -- 팔로워가 같은 해시를 알리면 다시
+     *   받지 않는다.
+     * push_map_rejected_hash: 검증에 실패해 설치하지 않은 맵의 해시. 같은
+     *   맵을 매 AE마다 다시 요청하지 않으려고 둔다.
+     * push_from / push_upto: 이 리더가 이 팔로워 장치에 쓰고 flush까지 마친
+     *   **연속** 로그 인덱스 구간 [push_from, push_upto]. 0이면 없다.
+     *   AE 배치가 이 구간에 통째로 들면 data_already_copied를 세운다
+     *   (push_covers). 팔로워 링이 바뀌었을 수 있는 순간(새 term, 해시
+     *   변화, 맵 재설치, 쓰기 실패)에는 비운다.
+     * push_fail_until: push 쓰기가 실패한 뒤 이 시각까지는 push하지 않는다.
+     * push_ae_skipped / push_ae_pulled: 이 팔로워가 push 대상일 때 보낸 엔트리
+     *   배치 중 push 구간에 들어 pull을 건너뛰게 한 수 / 구간 밖이라 pull로
+     *   보낸 수. 관측용 누적값이고 리셋하지 않는다 (-debug의 skip=, pull=).
+     * push_sub_from / push_sub_upto: 이 팔로워의 push 워커에 **맡긴** 연속 로그
+     *   인덱스 구간 (쓰는 중이거나 끝난 것). push_from/push_upto(끝난 구간)와
+     *   함께 AE 워커의 관문(push_gate)이 "쓰는 중이니 기다린다"를 판정한다.
+     * push_epoch: 위 두 구간을 비울 때마다 1씩 오르는 세대 번호
+     *   (reset_push_range). push job은 맡길 때의 번호를 들고 가고, 끝났을 때
+     *   번호가 다르면 결과를 버린다 -- 구간을 비운 뒤(롤백, 리더 교체, 링
+     *   교체) 늦게 끝난 job이 옛 엔트리나 옛 링에 대한 결과를 새 구간에 적지
+     *   못하게 한다. */
+    std::string push_device_path;
+    uint64_t push_map_hash = 0;
+    bool push_nodev_warned = false;
+    std::string push_device_wwid;
+    uint64_t push_map_cached_hash = 0;
+    uint64_t push_map_rejected_hash = 0;
+    uint64_t push_from = 0;
+    uint64_t push_upto = 0;
+    std::chrono::steady_clock::time_point push_fail_until{};
+    uint64_t push_ae_skipped = 0;
+    uint64_t push_ae_pulled = 0;
+    uint64_t push_sub_from = 0;
+    uint64_t push_sub_upto = 0;
+    uint64_t push_epoch = 0;
 };
 
 /* CachedFD는 blockio/cached_fd.h가 정의한다. 여기서는 shared_ptr로만 다루므로
@@ -259,6 +309,14 @@ struct RingLog {
      * mu를 보유하므로 평범한 필드로 둬도 안전하다. */
     AlignedBuffer run_buf;
 
+    /* ---- push job과 함께 쓰는 버퍼 풀 (DECISIONS.md D20) ----
+     * push 대상이 있는 persist 호출은 run_buf 대신 여기서 버퍼를 받는다.
+     * push job은 호출이 끝난 뒤에도 그 버퍼를 읽으므로(비동기) 공유 소유로
+     * 넘긴다. use_count()==1(어떤 job도 들고 있지 않음)인 것을 재사용하고,
+     * 없으면 새로 만든다 -- 큰 명령에서 매번 할당하면 페이지 폴트가 난다.
+     * 크기는 대상 수 x (큐 상한 + 1) 정도에서 멈춘다. mu로 보호된다. */
+    std::vector<std::shared_ptr<AlignedBuffer>> push_bufs;
+
     /* ---- 헤더 쓰기 스킵 캐시 ----
      * "persistCircular skips the header write on the append-only hot path
      *  when currentTerm and votedFor match these." */
@@ -320,6 +378,22 @@ struct StorageIo {
      * 이걸 통한다. */
     std::shared_ptr<CachedFD> cached_fd;
 
+
+    /* ---- push 모드 (DECISIONS.md D20) ----
+     * ring_map_hash: 자기 링의 extent 맵 해시. push 모드일 때만 init_storage가
+     *   채우고(0이 아님), AE 응답의 push_map_hash로 리더에게 알린다.
+     * push_fds: 클러스터 인덱스로 찾는 다른 멤버 볼륨의 장치 핸들
+     *   (CachedFD::open_device). 자기 자신과 매핑이 없는 멤버는 null.
+     * ring_extents: 자기 링의 extent 목록. 리더가 need_extent_map으로
+     *   요청하면 AE 응답에 그대로 싣는다.
+     * own_wwid: 자기 볼륨(device_path)의 wwid. 맵과 함께 보내 리더가 자기
+     *   -push-devices 매핑을 대조하게 한다.
+     * 이 넷은 init_storage 이후 바뀌지 않는다 (push_fds가 가리키는 CachedFD의
+     * extent 맵은 리더가 mu 아래에서 설치한다). */
+    uint64_t ring_map_hash = 0;
+    std::vector<std::shared_ptr<CachedFD>> push_fds;
+    std::vector<Extent> ring_extents;
+    std::string own_wwid;
 };
 
 /* ============================================================
@@ -350,6 +424,13 @@ struct AppendEntriesWorkerState {
 
     bool pending = false;
     std::shared_ptr<ReplSink> sink;
+
+    /* 하트비트 타이머(heartbeat())가 깨웠다는 표시. AE 워커는 자기가 왜
+     * 깨워졌는지 모른다(Apply, 하트비트, push 끝). push가 아직 쓰는 중이라
+     * 엔트리를 보내지 않는 회차에도 이 표시가 서 있으면 빈 AE를
+     * 보내 팔로워가 선거를 시작하지 않게 한다. 워커가 깨어날 때 가져가며
+     * 내린다. */
+    bool heartbeat_due = false;
 };
 
 struct WorkerPool {
@@ -376,6 +457,13 @@ struct WorkerPool {
     /* 진행 중인 복제 스레드 (팔로워별 AE 워커 / RequestVote 워커). */
     std::mutex inflight_mu;
     std::vector<ReplicationThreadSlot> inflight;
+
+    /* push 워커 (DECISIONS.md D20). 클러스터 인덱스로 찾고, 이 호스트에
+     * 그 멤버 볼륨의 장치가 매핑된(io.push_fds[i]) 멤버만 있다. 멤버와
+     * 매핑은 기동 때 고정이므로 start()가 한 번 만들고 stop()이 멈춘다.
+     * 그 멤버가 실제 push 대상인지는 실행 중에 정해지고, 일이 오지 않는
+     * 워커는 잠들어 있다. */
+    std::vector<std::unique_ptr<IoWorker>> push_io;
 };
 
 
