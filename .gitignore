@@ -34,3 +34,5 @@ raft_blockcopy_server_tcp.log
 raft_node_4_destination_tcp.log
 raft_node_5_destination_tcp.log
 raft_node_6_destination_tcp.log
+
+csv/

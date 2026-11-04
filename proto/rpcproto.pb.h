@@ -424,9 +424,24 @@ class EntryMeta final :
   // accessors -------------------------------------------------------
 
   enum : int {
+    kCommandFieldNumber = 3,
     kTermFieldNumber = 1,
     kCmdLenFieldNumber = 2,
   };
+  // bytes command = 3;
+  void clear_command();
+  const std::string& command() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_command(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_command();
+  PROTOBUF_NODISCARD std::string* release_command();
+  void set_allocated_command(std::string* command);
+  private:
+  const std::string& _internal_command() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_command(const std::string& value);
+  std::string* _internal_mutable_command();
+  public:
+
   // uint64 term = 1;
   void clear_term();
   uint64_t term() const;
@@ -453,6 +468,7 @@ class EntryMeta final :
   typedef void InternalArenaConstructable_;
   typedef void DestructorSkippable_;
   struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr command_;
     uint64_t term_;
     uint64_t cmd_len_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
@@ -937,6 +953,7 @@ class AppendEntriesRequest final :
     kLeaderDevIndexFieldNumber = 11,
     kDataAlreadyCopiedFieldNumber = 13,
     kNeedExtentMapFieldNumber = 14,
+    kInlineEntriesFieldNumber = 15,
   };
   // repeated .rpcproto.EntryMeta entry_metas = 12;
   int entry_metas_size() const;
@@ -1073,6 +1090,15 @@ class AppendEntriesRequest final :
   void _internal_set_need_extent_map(bool value);
   public:
 
+  // bool inline_entries = 15;
+  void clear_inline_entries();
+  bool inline_entries() const;
+  void set_inline_entries(bool value);
+  private:
+  bool _internal_inline_entries() const;
+  void _internal_set_inline_entries(bool value);
+  public:
+
   // @@protoc_insertion_point(class_scope:rpcproto.AppendEntriesRequest)
  private:
   class _Internal;
@@ -1095,6 +1121,7 @@ class AppendEntriesRequest final :
     int32_t leader_dev_index_;
     bool data_already_copied_;
     bool need_extent_map_;
+    bool inline_entries_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
   union { Impl_ _impl_; };
@@ -4028,6 +4055,56 @@ inline void EntryMeta::set_cmd_len(uint64_t value) {
   // @@protoc_insertion_point(field_set:rpcproto.EntryMeta.cmd_len)
 }
 
+// bytes command = 3;
+inline void EntryMeta::clear_command() {
+  _impl_.command_.ClearToEmpty();
+}
+inline const std::string& EntryMeta::command() const {
+  // @@protoc_insertion_point(field_get:rpcproto.EntryMeta.command)
+  return _internal_command();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void EntryMeta::set_command(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.command_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:rpcproto.EntryMeta.command)
+}
+inline std::string* EntryMeta::mutable_command() {
+  std::string* _s = _internal_mutable_command();
+  // @@protoc_insertion_point(field_mutable:rpcproto.EntryMeta.command)
+  return _s;
+}
+inline const std::string& EntryMeta::_internal_command() const {
+  return _impl_.command_.Get();
+}
+inline void EntryMeta::_internal_set_command(const std::string& value) {
+  
+  _impl_.command_.Set(value, GetArenaForAllocation());
+}
+inline std::string* EntryMeta::_internal_mutable_command() {
+  
+  return _impl_.command_.Mutable(GetArenaForAllocation());
+}
+inline std::string* EntryMeta::release_command() {
+  // @@protoc_insertion_point(field_release:rpcproto.EntryMeta.command)
+  return _impl_.command_.Release();
+}
+inline void EntryMeta::set_allocated_command(std::string* command) {
+  if (command != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.command_.SetAllocated(command, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.command_.IsDefault()) {
+    _impl_.command_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:rpcproto.EntryMeta.command)
+}
+
 // -------------------------------------------------------------------
 
 // RequestVoteRequest
@@ -4418,6 +4495,26 @@ inline void AppendEntriesRequest::_internal_set_need_extent_map(bool value) {
 inline void AppendEntriesRequest::set_need_extent_map(bool value) {
   _internal_set_need_extent_map(value);
   // @@protoc_insertion_point(field_set:rpcproto.AppendEntriesRequest.need_extent_map)
+}
+
+// bool inline_entries = 15;
+inline void AppendEntriesRequest::clear_inline_entries() {
+  _impl_.inline_entries_ = false;
+}
+inline bool AppendEntriesRequest::_internal_inline_entries() const {
+  return _impl_.inline_entries_;
+}
+inline bool AppendEntriesRequest::inline_entries() const {
+  // @@protoc_insertion_point(field_get:rpcproto.AppendEntriesRequest.inline_entries)
+  return _internal_inline_entries();
+}
+inline void AppendEntriesRequest::_internal_set_inline_entries(bool value) {
+  
+  _impl_.inline_entries_ = value;
+}
+inline void AppendEntriesRequest::set_inline_entries(bool value) {
+  _internal_set_inline_entries(value);
+  // @@protoc_insertion_point(field_set:rpcproto.AppendEntriesRequest.inline_entries)
 }
 
 // repeated .rpcproto.EntryMeta entry_metas = 12;

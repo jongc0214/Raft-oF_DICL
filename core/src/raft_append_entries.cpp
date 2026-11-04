@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 
 namespace nvmeof_raft {
 
@@ -314,28 +315,30 @@ void Server::append_entries_worker(int fi, ReplSink *sink, bool heartbeat_due) {
 
         uint64_t sent_next = next;
         bool has_entries = len_entries > 0;
-        if (has_entries) {
-            raft.cluster[static_cast<size_t>(fi)].inflight = true;
-        }
 
         /* ---- 4-6. MetaBuild ----
          * "Send lightweight entry metadata so follower can build its
          *  in-memory log without readback. Command payload is on the
          *  device via PBA copy; follower loads it lazily at apply time." */
+        const bool normal_mode = (replication_mode == ReplicationMode::Normal);
         std::vector<EntryMeta> metas;
         int64_t ae_sub_meta_build_ns = 0;
         if (len_entries > 0) {
             auto t_mb = clock_type::now();
-            metas.resize(len_entries);
-            for (uint64_t k = 0; k < len_entries; k++) {
-                Entry &e = raft.log[log_slice(next + k)];
-                uint64_t cl = e.command.size();
-                if (e.command.empty() && e.ring_slot != 0) {
-                    cl = e.cmd_len;   /* deferred entry: use stored cmdLen */
-                }
-                metas[k] = EntryMeta{e.term, cl};
+            try {
+                metas = build_entry_metas_locked(next, len_entries, normal_mode);
+            } catch (const std::exception &) {
+                /* 정상경로에서 자기 링 읽기(read_entry_direct)가 실패했다. Leader-Side
+                 * 복사 실패와 같은 fail-soft: 이번 회차는 버리고 다음 라운드에 재시도.
+                 * inflight는 아직 세우지 않았다. */
+                mu.unlock();
+                return;
             }
             ae_sub_meta_build_ns = elapsed_ns(t_mb);
+        }
+
+        if (has_entries) {
+            raft.cluster[static_cast<size_t>(fi)].inflight = true;
         }
 
         AppendEntriesRequest req;
@@ -351,6 +354,15 @@ void Server::append_entries_worker(int fi, ReplSink *sink, bool heartbeat_due) {
         req.start_slot = start_slot;
         req.leader_dev_index = raft.cluster_index;
         req.entry_metas = std::move(metas);
+        if (normal_mode) {
+            /* 정상경로 (DECISIONS.md D22): 바이트는 entry_metas[i].command로 간다.
+             * 위 extent clamp로 정한 len_entries/start_slot은 그대로 쓴다 -- 리더가
+             * extent 경계에서 슬롯을 건너뛰므로 팔로워가 start_slot부터 차례로
+             * 놓으려면 그 clamp가 필요하다. PBA 필드만 비운다. */
+            req.inline_entries = has_entries;
+            req.leader_pba_src = 0;
+            req.log_block_length = 0;
+        }
         /* push 모드: 이 팔로워의 맵을 아직 안 받았거나 팔로워가 알린 해시가
          * 받아 둔 맵과 다르면 응답에 맵을 실어 달라고 한다 (DECISIONS.md D20).
          * heartbeat에도 실린다 -- 맵은 엔트리와 무관하다. */
@@ -613,6 +625,55 @@ void Server::append_entries_loop(int fi, AppendEntriesWorkerState *w) {
  *
  * 둘 다 **호출자가 mu를 보유한 상태**로 불러야 한다.
  * ============================================================ */
+
+/* build_entry_metas_locked: AE에 실을 엔트리 메타 [next, next+len).
+ *
+ * 블록 복사 모드(with_payload=false)는 예전 MetaBuild 그대로다 -- term과
+ * cmd_len만 싣는다. 주의: 이 경로는 apply가 비운 엔트리(command 비움,
+ * ring_slot 0, cmd_len만 남음)에 cl=0을 싣는다. 느린 팔로워에게 다중 슬롯
+ * 엔트리를 보낼 때 슬롯 계산이 어긋날 수 있는 기존 동작이며 여기서는
+ * 바꾸지 않는다 -- DECISIONS.md U12.
+ *
+ * 정상경로(with_payload=true)는 명령 바이트를 채운다:
+ *   1. 메모리에 있으면 복사
+ *   2. deferred(ring_slot != 0)면 그 슬롯에서 read_entry_direct
+ *   3. apply가 비운 엔트리(cmd_len > 0)면 log_slot_map의 시작 슬롯에서
+ *      read_entry_direct -- 느린 팔로워 catch-up 경로. 보낼 엔트리는
+ *      next > match_index >= min_match 라 do_slot_gc가 아직 해제하지 않았다
+ *   4. 아니면 no-op (빈 명령)
+ * cmd_len은 실제로 실은 명령 길이다. 호출자가 mu를 보유한다. */
+std::vector<EntryMeta> Server::build_entry_metas_locked(uint64_t next, uint64_t len,
+                                                        bool with_payload) {
+    std::vector<EntryMeta> metas(len);
+    for (uint64_t k = 0; k < len; k++) {
+        const uint64_t idx = next + k;
+        Entry &e = raft.log[log_slice(idx)];
+        EntryMeta &m = metas[k];
+        m.term = e.term;
+        if (!with_payload) {
+            uint64_t cl = e.command.size();
+            if (e.command.empty() && e.ring_slot != 0) {
+                cl = e.cmd_len;   /* deferred entry: use stored cmdLen */
+            }
+            m.cmd_len = cl;
+            continue;
+        }
+        if (!e.command.empty()) {
+            m.command = e.command;
+        } else if (e.ring_slot != 0) {
+            m.command = read_entry_direct(e.ring_slot).entry.command;
+        } else if (e.cmd_len > 0) {
+            auto it = ring.log_slot_map.find(idx);
+            if (it == ring.log_slot_map.end()) {
+                throw std::runtime_error("build_entry_metas_locked: no slot for applied entry " +
+                                         std::to_string(idx));
+            }
+            m.command = read_entry_direct(it->second.start).entry.command;
+        }
+        m.cmd_len = m.command.size();
+    }
+    return metas;
+}
 
 /* AppendEntries가 성공했을 때 next_index/match_index를 전진시키고,
  * 팔로워에게 아직 보낼 엔트리가 남았으면 다음 하트비트를 즉시 만료시킨다.

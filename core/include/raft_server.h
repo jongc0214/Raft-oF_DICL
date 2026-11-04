@@ -154,8 +154,14 @@ public:
      *   pull을 건너뛴다(push_gate). AE는 push 쓰기와 flush가 끝난 뒤에 나가므로
      *   AE 자체가 "썼다"는 알림이다 -- 따로 OK를 보내지 않는다. 맡긴 적 없는
      *   배치(맵 받기 전의 no-op, catch-up, push 실패 뒤)는 기본(destination)
-     *   경로로 pull한다. */
-    enum class ReplicationMode { DestinationSide, LeaderSide, Push };
+     *   경로로 pull한다.
+     * Normal (정상경로, 비교 기준선, DECISIONS.md D22): 교과서 Raft처럼 AE에
+     *   명령 바이트를 싣는다(inline_entries). 팔로워가 자기 링에 직접
+     *   pwrite + fdatasync한 뒤 성공을 답한다 -- 스토리지 노드를 쓰지 않는다.
+     *   배치 결정(슬롯, wrap, extent clamp)과 팔로워의 in-memory 로그
+     *   (deferred 엔트리)는 destination 경로와 같고, 바이트를 누가 쓰는지만
+     *   다르다. */
+    enum class ReplicationMode { DestinationSide, LeaderSide, Push, Normal };
     ReplicationMode replication_mode = ReplicationMode::DestinationSide;
 
     /* --- NVMe-oF Setting --- */
@@ -255,6 +261,15 @@ public:
     PersistPlan persist_prepare_locked(int n_new_entries, std::shared_ptr<ReplSink> sink = nullptr);
     int64_t persist_io(const PersistPlan &plan);
 
+    /* 정상경로 팔로워 쓰기 (DECISIONS.md D22). req.entry_metas의 명령 바이트를
+     * persist_circular와 같은 온-디스크 인코딩으로 start_slot부터 연속으로
+     * 쓰고 fdatasync한다. **mu 없이** 호출한다 -- raft.log도 ring도 보지 않고
+     * 버퍼는 호출마다 따로 쓴다(AE 핸들러가 커넥션별 스레드로 동시에 들어온다).
+     * 배치는 리더의 wrap clamp로 링 끝을 넘지 않는다. 실패하면 예외. */
+    struct FollowerWriteResult { int64_t write_ns; int64_t sync_ns; };
+    FollowerWriteResult persist_follower_entries(uint64_t start_slot,
+                                                 const AppendEntriesRequest &req);
+
     /* advanceCommitIndex, applyPending, doSlotGC (raft_commit.cpp에서 정의) */
     void advance_commit_index();
     void advance_commit_index_locked(
@@ -350,6 +365,13 @@ public:
     bool apply_ae_failure_backoff(int fi, uint64_t prev_log_index,
                                   uint64_t conflict_term, uint64_t conflict_index,
                                   uint64_t sent_next);
+
+    /* AE에 실을 엔트리 메타 [next, next+len)을 만든다. with_payload(정상경로)면
+     * 명령 바이트도 채운다 -- 메모리에 없으면(deferred, 또는 apply가 비운 엔트리)
+     * 자기 링에서 read_entry_direct로 읽는다. 읽기 실패는 예외.
+     * **호출자가 mu를 보유**해야 한다. (raft_append_entries.cpp) */
+    std::vector<EntryMeta> build_entry_metas_locked(uint64_t next, uint64_t len,
+                                                    bool with_payload);
 
     /* leaderPBAForRange, doPBACopy (raft_pba.cpp에서 정의) */
     struct PbaRangeResult { uint64_t pba_src; uint64_t nbytes; };

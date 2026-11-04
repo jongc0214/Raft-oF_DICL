@@ -313,6 +313,45 @@ p50/p99 를 보고한다.
   없으므로, 드라이버가 서버 기동 로그의 `copy-workers : N` 과 대조한다
   (불일치면 그 지점을 실패시킨다)
 
+## D22. 정상경로(`-mode normal`): AE가 명령 바이트를 싣고 팔로워가 직접 쓴다
+
+`core/src/raft_append_entries.cpp` · `build_entry_metas_locked` / `append_entries_worker`
+`core/src/raft_handle_append_entries.cpp` · `handle_append_entries_request`
+`core/src/raft_persist.cpp` · `persist_follower_entries` / `encode_entry`
+
+블록 복사 모드(destination / leader / push)와 비교할 **교과서 Raft 기준선**이다.
+리더는 `EntryMeta.command`에 명령 바이트를 싣고 `inline_entries = true`를 세운다.
+팔로워는 그 바이트를 자기 링에 pwrite + fdatasync한 뒤 성공을 답한다. 스토리지 노드는
+쓰지 않는다.
+
+**바이트를 누가 쓰느냐만 바뀌고 나머지는 destination 경로와 같다.** 이것이 계약이다:
+
+- **슬롯 배치는 리더를 미러링한다.** 리더 배치 결정(slot map 조회, 바이트 상한, wrap
+  clamp, extent clamp)을 그대로 거친다 -- 리더가 extent 경계에서 슬롯을 건너뛰므로
+  팔로워가 `start_slot`부터 차례로 놓으려면 그 clamp가 필요하다. 그래서 팔로워 링의
+  용량은 리더의 `do_slot_gc` / `ring_not_full`이 그대로 지배한다
+- **온-디스크 인코딩이 리더와 바이트 단위로 같다** (`encode_entry` 단일 출처, D13).
+  그래서 승격 시 `become_leader`의 deferred 로드가 PBA로 복사된 링과 똑같이 읽는다.
+  `tests/test_normal_path.cpp`가 "팔로워가 쓴 링 == 리더 persist"를 고정한다
+- **팔로워 in-memory 로그는 deferred 엔트리다** (`command` 비움 + `ring_slot`).
+  예외: 슬롯 0에 놓인 엔트리는 `command`를 남긴다 (U13)
+- **리더는 자기 persist가 끝난 엔트리만 보낸다** (`durable_last_index_locked()` 그대로).
+  병렬 persist는 하지 않는다 -- 블록 복사 모드와 같은 순서 제약에서 비교하기 위해서다
+- **겹치는 엔트리는 기존 skip 의미 그대로다** (term 비교·truncate 없음)
+- 리더 쪽 명령 확보: 메모리 → deferred면 `read_entry_direct(ring_slot)` → apply가 비운
+  엔트리면 `read_entry_direct(log_slot_map[idx].start)`. 보낼 엔트리는
+  `next > match >= min_match`라 slot map이 아직 GC되지 않았다. 읽기 실패는 이번 회차를
+  버리는 fail-soft
+- 측정: 팔로워는 pwrite+fdatasync wall을 `write_pba_rt_ns` / `storage_copy_ns`에,
+  pwrite만 `storage_write_ns`에 싣는다. apply-timed의 StorageIO 칸이 "팔로워 로컬 쓰기"가
+  되어 destination과 나란히 비교된다
+
+**메시지 크기.** `max_ae_batch_bytes` 기본값(5 GiB)으로는 RDMA 메시지 버퍼
+(`kRdmaMaxMessageBytes` = 1 MiB)를 넘는 배치가 나온다. normal 모드에서 `-ae-batch-bytes`를
+안 주면 `apps/raft_node_main.cpp`가 1 MiB - 64 KiB로 낮춘다. 상한은 `slots*512`로 세므로
+실제 페이로드보다 크게 잡히고, proto 오버헤드는 실측 600 KB에 32 B다.
+**단일 엔트리가 ~1 MiB를 넘으면 이 모드+RDMA로는 보낼 수 없다** (전송이 명시적 예외로 실패).
+
 ## U. 미해결 — 리팩토링 중 마주치면 여기를 볼 것
 
 | # | 항목 | 위치 | 상태 |
@@ -328,6 +367,8 @@ p50/p99 를 보고한다.
 | U9 | **`WritePBABatchResponse` 에 `read_nanos`/`write_nanos` 추가 (2026-09-07, additive).** `copy_nanos` 합계만으로는 로컬 PCIe 복사와 NVMe-oF attach 볼륨 복사의 지연 차이가 pread 쪽인지 pwrite 쪽인지 알 수 없다. 서버는 이미 `total_read_ns`/`total_write_ns` 를 따로 들고 있어 합치기 전 값을 실어 보내는 것뿐이고, 측정 비용은 0이다. proto3 additive 필드(3, 4번)라 이 필드를 모르는 피어는 0으로 읽는다 — `AppendEntriesResponse` 8~12번과 같은 선례 | `proto/rpcproto.proto` · `storage/raft_blockcopy_server.{h,cpp}` · `net/include/raft_proto_conv.h` | 재생성은 `protoc 3.21.12` (커밋된 `.pb.cc` 와 같은 버전, eternity5 의 `/usr/bin/protoc`). CTest 11개 전부 통과 확인 |
 | U10 | **blockcopy 에 노드↔노드 데이터 경로가 없다** (`storage/raft_blockcopy_server.cpp:16-18` 의 `TODO: inter-node storage copy`). `WritePBABatchRequest.src_dev`/`dst_dev` 는 **한 프로세스**가 `-devices` 로 연 fd 배열의 인덱스이고, 복사는 그 두 fd 사이의 pread+pwrite 다. 설계가 말하는 "원격 노드" 는 NVMe-oF 로 attach 되어 로컬 경로처럼 보이는 볼륨이다 (`apps/raft_blockcopy_server_main.cpp` 머리 주석) | `storage/raft_blockcopy_server.cpp` | 미구현 상태 그대로 둔다. 측정 실험(`scripts/blkcopy_scaling.sh`, 2026-09-10 이전에는 `blkcopy_latency.sh`)은 이 정의를 따라 "로컬 PCIe 두 네임스페이스" vs "같은 SSD 의 NVMe-oF attach 뷰 두 개" 로 arm 을 나눈다. **주의: 이 클러스터의 NVMe-oF/TCP 는 1 GbE(eno, MTU 1500) 위에서 돈다** — 상한 ~118 MB/s 라, 이 경로로만 재면 blockcopy 가 아니라 링크 대역폭을 재게 된다. 전송별 arm(`fabric-tcp`/`fabric-ipoib`/`fabric-rdma`) 설정과 RDMA 준비 상태는 `scripts/README.md` 참고. 실측 RTT 는 IPoIB 0.197ms vs 1GbE 0.214ms 로 **사실상 같다**(IPoIB 도 커널 IP 스택을 탄다) — 지연을 줄이려면 IB 로 옮기는 것으로는 부족하고 `trtype=rdma` 여야 한다 |
 | U11 | **`FALLOC_FL_ZERO_RANGE` 가 ext4 에서 extent 를 "written" 으로 만들지 않는다 — D9 의 전제가 성립하지 않는다.** `create_ring_file` 은 매 기동마다 링 파일 전체에 ZERO_RANGE 를 걸고, D9 와 `blockio/cached_fd.h:29-35` 는 그것이 extent 를 전부 written 으로 뒤집어 "이후 첫 쓰기가 파일시스템 저널을 통한 extent 상태 변환으로 직렬화" 되는 것을 막는다고 서술한다. **실측 결과 ZERO_RANGE 후에도 extent 는 unwritten 으로 남는다** — ext4 에서는 범위를 unwritten 으로 두는 것이 가장 싼 zeroing 구현이기 때문으로 보인다. 커널 4.15(eternitymaster)와 6.8(eternitystorage) 양쪽에서 동일했다: `fallocate -l` → unwritten, `fallocate -l` + `fallocate -z` → **여전히 unwritten**, `dd oflag=direct`(실제 쓰기) → written. 라이브 링 파일 `/mnt/raftvol/node5/raft_meta.bin`(32GiB, 3시간 가동)도 **257 extent 중 257 개가 unwritten** 이고 블록 0(헤더 쓰기가 닿은 곳)만 written 이었다 | `blockio/cached_fd.cpp` `create_ring_file` · `DECISIONS.md D9` | **미해결. 이번에는 고치지 않았다** (blockcopy 벤치 교체 작업 범위 밖이고, `blockio`/`storage` 변경은 U7 대조군에 영향을 준다). 확인된 것은 **전제가 틀렸다는 사실**까지다 — 그 결과로 실제 지연이 얼마나 늘어나는지는 측정하지 않았다. U7(StorageIO 격차)과 관련이 있을 수 있으므로 그 조사에서 같이 볼 것. 고치려면 extent 를 실제로 written 으로 만들어야 하는데, 링 파일 전체를 한 번 쓰는 비용(기본 32GiB/노드)이 기동 시간에 그대로 붙는다 — 비용/이득을 따져 결정할 일이다. 새 벤치(`scripts/blkcopy_scaling.sh`)는 이 문제를 피하려고 백킹 파일을 `dd oflag=direct` 로 준비하고 preflight 에서 unwritten extent 를 검사해 거부한다 |
+| U12 | **블록 복사 모드의 MetaBuild가 apply로 비워진 엔트리에 `cmd_len = 0`을 싣는다.** `apply_pending`은 엔트리를 apply한 뒤 `cmd_len`만 남기고 `command`를 비우며 `ring_slot = 0`으로 둔다. MetaBuild는 `command.empty() && ring_slot != 0`일 때만 `cmd_len`을 쓰므로 이 엔트리에는 0을 싣는다. 커밋(과반) 뒤 apply된 엔트리를 아직 못 받은 느린 팔로워가 다중 슬롯 엔트리를 받으면 `slots_for_entry(0) = 1`로 `tail_slot`이 어긋나고 이후 lazy load가 다른 바이트를 읽을 수 있다. 실측 재현은 하지 않았다 (정상경로 구현 중 코드 독해로 발견, 2026-11-03) | `core/src/raft_append_entries.cpp` `build_entry_metas_locked` | 미해결. 정상경로(D22)는 실제 명령 길이를 실으므로 해당 없음. 고치려면 `cl = e.command.empty() ? e.cmd_len : e.command.size()` |
+| U13 | **`ring_slot == 0`이 "deferred 아님"과 "슬롯 0에 있음"을 구분하지 못한다.** 팔로워의 deferred 엔트리가 슬롯 0에 놓이면 `command`가 비어 있고 `ring_slot`도 0이라 `become_leader`가 로드하지 않고, 빈 명령으로 apply된다 (`apply_pending`은 빈 명령을 건너뛴다) | `core/src/raft_handle_append_entries.cpp` · `core/src/raft_election.cpp` | 블록 복사 경로는 미해결. 정상경로(D22)는 슬롯 0 엔트리의 명령을 메모리에 남겨 피한다. 정해는 "deferred" 표식을 별도 bool로 두는 것 |
 
 그 외 남은 작업 목록은 HANDOFF.md §7에 있다.
 

@@ -19,6 +19,9 @@ message RingExtent {
 message EntryMeta {
   uint64 term = 1;
   uint64 cmd_len = 2;
+  // Normal mode (-mode normal) only: the command bytes themselves. Empty in
+  // the block-copy modes, where the bytes travel by PBA copy / push instead.
+  bytes command = 3;
 }
 
 // ---- Raft-internal RPCs ----
@@ -56,6 +59,9 @@ message AppendEntriesRequest {
   // Push mode (DECISIONS.md D20): the leader asks this follower to send its
   // ring extent map back (extent_map / volume_wwid in the response).
   bool need_extent_map = 14;
+  // Normal mode: entry_metas[i].command carries the payload and the follower
+  // writes it to its own ring at start_slot. PBA fields are unused (0).
+  bool inline_entries = 15;
   // Inline entry metadata — follower builds its in-memory log from these
   // without carrying command payload. Command bytes are loaded lazily from
   // the ring device at apply time.

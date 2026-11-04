@@ -80,6 +80,9 @@ struct Entry {
 struct EntryMeta {
     uint64_t term = 0;
     uint64_t cmd_len = 0;
+    /* 정상경로(ReplicationMode::Normal)에서만 채운다: 명령 바이트 자체.
+     * 블록 복사 모드에서는 비어 있다 -- 바이트는 PBA copy / push로 간다. */
+    std::vector<uint8_t> command;
 };
 
 /* ============================================================
@@ -135,6 +138,12 @@ struct AppendEntriesRequest {
      * 않거나 팔로워가 알린 해시가 받아 둔 맵과 다를 때만 true다
      * (Server::needs_extent_map). */
     bool need_extent_map = false;
+
+    /* inline_entries: 정상경로(ReplicationMode::Normal). entry_metas[i].command에
+     * 명령 바이트가 실려 있고, 팔로워는 그것을 자기 링의 start_slot부터 직접
+     * 써서(pwrite + fdatasync) 내구화한다. PBA 필드(leader_pba_src /
+     * log_block_length)는 0이다 (DECISIONS.md D22). */
+    bool inline_entries = false;
 
     /* Inline entry metadata: follower builds in-memory log from these
      * (Term + CmdLen only, no command payload). Command is loaded lazily

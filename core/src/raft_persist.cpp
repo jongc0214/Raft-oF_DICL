@@ -7,9 +7,45 @@
 #include <chrono>
 #include <cstring>
 #include <cstdio>
+#include <stdexcept>
 #include <string>
 
 namespace nvmeof_raft {
+
+namespace {
+/* 엔트리 하나를 온-디스크 형식으로 region[0, needed*SECTOR_SIZE)에 인코딩한다.
+ * persist_circular / persist_prepare_locked / persist_follower_entries가 공유하는
+ * 단일 출처다 -- 읽는 쪽(read_entry_direct)과 짝이 맞아야 한다 (DECISIONS.md D13).
+ *
+ * Entry 헤더 레이아웃 (raft.go 원본 그대로):
+ *   [0:8)   Term
+ *   [8:16)  cmdLen
+ *   [16:24) needed (numSlots)
+ *   [24:32) logIdx
+ *   [32:..) Command 바이트 (ENTRY_META_SIZE = 32부터 시작)
+ *
+ * 패드는 0으로 지운다. 원본 주석: "Zero only the trailing pad between
+ * (header+command) and the slot boundary. Matches goraft/raft.go:599-601
+ * exactly... s.runBuf is reused... without this clear stale tail bytes from
+ * prior calls would leak onto the device." */
+void encode_entry(uint8_t *region, uint64_t term, const uint8_t *cmd, size_t cmd_len,
+                  uint64_t needed, uint64_t log_idx) {
+    put_u64_le(region + entry_hdr::kOffTerm, term);
+    put_u64_le(region + entry_hdr::kOffCmdLen, cmd_len);
+    put_u64_le(region + entry_hdr::kOffNumSlots, needed);
+    put_u64_le(region + entry_hdr::kOffLogIndex, log_idx);
+    if (cmd_len > 0) {
+        /* no-op 엔트리는 command가 비어 있고 vector::data()가 nullptr이다.
+         * memcpy(dst, nullptr, 0)은 형식상 UB라 UBSan이 잡는다 (D14). */
+        std::memcpy(region + ENTRY_META_SIZE, cmd, cmd_len);
+    }
+    const size_t entry_bytes = static_cast<size_t>(needed) * SECTOR_SIZE;
+    const size_t pad_start = ENTRY_META_SIZE + cmd_len;
+    if (entry_bytes > pad_start) {
+        std::memset(region + pad_start, 0, entry_bytes - pad_start);
+    }
+}
+}  /* namespace */
 
 /* ============================================================
  * persistCircular (raft.go 원본, 로직 그대로 포팅)
@@ -123,33 +159,7 @@ int64_t Server::persist_circular(bool write_log, int n_new_entries,
             run_buffer.grow_uninit(off + entry_bytes);
             uint8_t *region = run_buffer.data() + off;
 
-            /* Entry 헤더 레이아웃 (raft.go 원본 그대로):
-             *   [0:8)   Term
-             *   [8:16)  cmdLen
-             *   [16:24) needed (numSlots)
-             *   [24:32) logIdx
-             *   [32:..) Command 바이트 (ENTRY_META_SIZE = 32부터 시작) */
-            put_u64_le(region + entry_hdr::kOffTerm, e.term);
-            put_u64_le(region + entry_hdr::kOffCmdLen, e.command.size());
-            put_u64_le(region + entry_hdr::kOffNumSlots, needed);
-            put_u64_le(region + entry_hdr::kOffLogIndex, log_idx);
-            if (!e.command.empty()) {
-                /* no-op 엔트리는 command가 비어 있고 vector::data()가
-                 * nullptr이다. memcpy(dst, nullptr, 0)은 형식상 UB라
-                 * UBSan이 잡는다 (동작은 무해했음). */
-                std::memcpy(region + ENTRY_META_SIZE, e.command.data(), e.command.size());
-            }
-
-            /* 원본 주석: "Zero only the trailing pad between
-             * (header+command) and the slot boundary. Matches
-             * goraft/raft.go:599-601 exactly... s.runBuf is reused...
-             * without this clear stale tail bytes from prior calls
-             * would leak onto the device." */
-            size_t pad_start = ENTRY_META_SIZE + e.command.size();
-
-            if (entry_bytes > pad_start) {
-                std::memset(region + pad_start, 0, entry_bytes - pad_start);
-            }
+            encode_entry(region, e.term, e.command.data(), e.command.size(), needed, log_idx);
 
             uint64_t start_slot = ring.tail_slot;
             ring.tail_slot += needed;
@@ -332,18 +342,7 @@ Server::PersistPlan Server::persist_prepare_locked(int n_new_entries,
         run_buffer.grow_uninit(off + entry_bytes);
         uint8_t *region = run_buffer.data() + off;
 
-        put_u64_le(region + entry_hdr::kOffTerm, e.term);
-        put_u64_le(region + entry_hdr::kOffCmdLen, e.command.size());
-        put_u64_le(region + entry_hdr::kOffNumSlots, needed);
-        put_u64_le(region + entry_hdr::kOffLogIndex, log_idx);
-        if (!e.command.empty()) {
-            std::memcpy(region + ENTRY_META_SIZE, e.command.data(), e.command.size());
-        }
-
-        size_t pad_start = ENTRY_META_SIZE + e.command.size();
-        if (entry_bytes > pad_start) {
-            std::memset(region + pad_start, 0, entry_bytes - pad_start);
-        }
+        encode_entry(region, e.term, e.command.data(), e.command.size(), needed, log_idx);
 
         uint64_t start_slot = ring.tail_slot;
         ring.tail_slot += needed;
@@ -416,6 +415,57 @@ int64_t Server::persist_io(const PersistPlan &plan) {
         nvme_ns += elapsed_ns(t_sync);
     }
     return nvme_ns;
+}
+
+/* ============================================================
+ * persist_follower_entries -- 정상경로 팔로워의 로그 쓰기 (DECISIONS.md D22)
+ *
+ * destination 경로에서 do_pba_copy가 하던 일(리더 링의 [start_slot, ...) 바이트를
+ * 내 링의 같은 슬롯으로 옮기기)을, 리더가 AE에 실어 보낸 명령 바이트로 직접
+ * 한다. 결과 바이트는 리더의 persist와 같다 -- 인코딩이 같고(encode_entry),
+ * 리더 배치는 wrap/extent clamp로 슬롯이 연속이므로 start_slot부터 차례로
+ * 놓으면 리더가 놓은 자리와 같다. 그래서 이후 read_entry_direct(승격 시
+ * deferred 로드)가 PBA로 복사된 링과 똑같이 읽는다.
+ *
+ * mu 없이 불린다. 버퍼는 호출마다 새로 잡는다 (ring.run_buf는 mu 아래 자원이고
+ * AE 핸들러는 커넥션마다 스레드가 따로 돈다).
+ * ============================================================ */
+Server::FollowerWriteResult Server::persist_follower_entries(uint64_t start_slot,
+                                                             const AppendEntriesRequest &req) {
+    FollowerWriteResult r{0, 0};
+    if (req.entry_metas.empty()) {
+        return r;
+    }
+
+    size_t total = 0;
+    for (const EntryMeta &m : req.entry_metas) {
+        total += static_cast<size_t>(slots_for_entry(m.command.size())) * SECTOR_SIZE;
+    }
+    if (start_slot + total / SECTOR_SIZE > ring.ring_slots) {
+        /* 리더의 wrap clamp가 막아야 하는 경우다. 조용히 감싸 쓰면 슬롯 배치가
+         * 리더와 갈라지므로 거절한다 (호출부가 fail-soft로 이 배치를 버린다). */
+        throw std::runtime_error("persist_follower_entries: batch crosses ring end at slot " +
+                                 std::to_string(start_slot));
+    }
+
+    AlignedBuffer buf(total, SECTOR_SIZE);
+    buf.clear();
+    for (size_t i = 0; i < req.entry_metas.size(); i++) {
+        const EntryMeta &m = req.entry_metas[i];
+        const uint64_t needed = slots_for_entry(m.command.size());
+        const size_t off = buf.size();
+        buf.grow_uninit(off + static_cast<size_t>(needed) * SECTOR_SIZE);
+        encode_entry(buf.data() + off, m.term, m.command.data(), m.command.size(),
+                     needed, req.prev_log_index + 1 + i);
+    }
+
+    auto t_io = clock_type::now();
+    io.cached_fd->write_at_file(buf.data(), buf.size(), slot_offset(start_slot));
+    r.write_ns = elapsed_ns(t_io);
+    auto t_sync = clock_type::now();
+    io.cached_fd->fdatasync();
+    r.sync_ns = elapsed_ns(t_sync);
+    return r;
 }
 
 /* [push 통합 4] jongc 에서 그대로 가져온 버퍼 풀 (mu 보유 중 호출) */

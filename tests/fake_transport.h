@@ -72,6 +72,8 @@ class FakeBlockCopyClient : public BlockCopyClient {
 public:
     /* copy_ns로 돌려줄 값. fail_with가 비어 있지 않으면 그 메시지로 실패한다. */
     int64_t copy_ns = 0;
+    int64_t read_ns = 0;    /* copy_ns 중 pread 몫 */
+    int64_t write_ns = 0;   /* copy_ns 중 pwrite 몫 */
     std::string fail_with;
 
     bool write_pba_batch(const std::vector<uint64_t> &pba_srcs,

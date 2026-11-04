@@ -104,13 +104,18 @@ void usage(const char *prog) {
       "  -transport KIND    rdma (default) | tcp. RDMA uses rdma_cm over the\n"
       "                     IPoIB addresses given in -cluster; tcp is the\n"
       "                     fallback for hosts without an IB link.\n"
-      "  -mode MODE         destination (default) | leader | push\n"
+      "  -mode MODE         destination (default) | leader | push | normal\n"
       "                     replication policy; 'leader' is the DARE-style\n"
       "                     policy for comparison (hpdc15dare 3.1.2).\n"
       "                     'push' (in progress, DECISIONS.md D20): as leader,\n"
       "                     write the log into push followers' volumes too.\n"
       "                     For now followers still pull as well, so each\n"
       "                     pushed byte is also copied destination-side.\n"
+      "                     'normal' (DECISIONS.md D22): textbook Raft baseline.\n"
+      "                     AE carries the command bytes and each follower\n"
+      "                     writes them to its own ring; no storage node.\n"
+      "                     -ae-batch-bytes defaults to 960KiB here so one AE\n"
+      "                     fits the 1MiB RDMA message buffer.\n"
       "  -push-devices MAP  push mode only. ID=PATH[,ID=PATH...]: the block\n"
       "                     device ON THIS HOST that holds member ID's volume\n"
       "                     (attached over NVMe-oF, never mounted here). Names\n"
@@ -285,8 +290,18 @@ int main(int argc, char **argv) {
         server->replication_mode = Server::ReplicationMode::DestinationSide;
     } else if (mode == "push") {
         server->replication_mode = Server::ReplicationMode::Push;
+    } else if (mode == "normal") {
+        server->replication_mode = Server::ReplicationMode::Normal;
+        /* 정상경로는 명령 바이트가 AE 한 메시지에 실린다. 기본 바이트 상한(5GiB)
+         * 그대로면 RDMA 메시지 버퍼(kRdmaMaxMessageBytes = 1MiB)를 넘는 배치를
+         * 만들어 전송이 예외로 실패한다. 상한은 slots*512로 세므로 실제 페이로드
+         * (cmd + 32B 헤더 이하)보다 크게 잡힌다 -- 64KiB를 남겨 proto 오버헤드를
+         * 덮는다. 단일 엔트리가 ~1MiB를 넘으면 이 모드+RDMA로는 못 보낸다 (D22). */
+        if (ae_batch_bytes == 0) {
+            server->max_ae_batch_bytes = kRdmaMaxMessageBytes - 64 * 1024;
+        }
     } else {
-        std::fprintf(stderr, "-mode must be 'destination' or 'leader'\n");
+        std::fprintf(stderr, "-mode must be 'destination', 'leader', 'push' or 'normal'\n");
         return 1;
     }
 
@@ -395,7 +410,12 @@ int main(int argc, char **argv) {
                 server->io.device_path.c_str());
     std::printf("  precondition : %s\n",
                 precondition_ring ? "on" : "off");
-    std::printf("  replication  : %s-side\n", mode.c_str());
+    if (server->replication_mode == Server::ReplicationMode::Normal) {
+        std::printf("  replication  : normal (AE carries payload, ae-batch-bytes=%llu)\n",
+                    static_cast<unsigned long long>(server->max_ae_batch_bytes));
+    } else {
+        std::printf("  replication  : %s-side\n", mode.c_str());
+    }
     /* push 모드: 매핑한 장치가 정말 그 멤버의 볼륨인지 사람도 확인할 수 있게
      * wwid를 찍는다. 호스트 A의 "5 -> ..." wwid와 호스트 5의 "own volume"
      * wwid가 같아야 한다 (장치 이름은 호스트마다 다르다). 리더는 맵을 받을 때

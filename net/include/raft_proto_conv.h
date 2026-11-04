@@ -53,10 +53,17 @@ inline Extent ring_extent_from_proto(const rpcproto::RingExtent &p) {
 inline void entry_meta_to_proto(const EntryMeta &g, rpcproto::EntryMeta *p) {
     p->set_term(g.term);
     p->set_cmd_len(g.cmd_len);
+    if (!g.command.empty()) {
+        p->set_command(g.command.data(), g.command.size());
+    }
 }
 
 inline EntryMeta entry_meta_from_proto(const rpcproto::EntryMeta &p) {
-    return EntryMeta{p.term(), p.cmd_len()};
+    EntryMeta m;
+    m.term = p.term();
+    m.cmd_len = p.cmd_len();
+    m.command.assign(p.command().begin(), p.command().end());
+    return m;
 }
 
 /* ============================================================
@@ -155,6 +162,7 @@ inline void append_entries_request_to_proto(const AppendEntriesRequest &g,
     p->set_leader_dev_index(g.leader_dev_index);
     p->set_data_already_copied(g.data_already_copied);
     p->set_need_extent_map(g.need_extent_map);
+    p->set_inline_entries(g.inline_entries);
 
     p->clear_entry_metas();
     for (const auto &m : g.entry_metas) {
@@ -177,6 +185,7 @@ inline void append_entries_request_from_proto(const rpcproto::AppendEntriesReque
     g.leader_dev_index = p.leader_dev_index();
     g.data_already_copied = p.data_already_copied();
     g.need_extent_map = p.need_extent_map();
+    g.inline_entries = p.inline_entries();
 
     g.entry_metas.clear();
     g.entry_metas.reserve(static_cast<size_t>(p.entry_metas_size()));

@@ -38,7 +38,8 @@ struct RingExtentDefaultTypeInternal {
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 RingExtentDefaultTypeInternal _RingExtent_default_instance_;
 PROTOBUF_CONSTEXPR EntryMeta::EntryMeta(
     ::_pbi::ConstantInitialized): _impl_{
-    /*decltype(_impl_.term_)*/uint64_t{0u}
+    /*decltype(_impl_.command_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.term_)*/uint64_t{0u}
   , /*decltype(_impl_.cmd_len_)*/uint64_t{0u}
   , /*decltype(_impl_._cached_size_)*/{}} {}
 struct EntryMetaDefaultTypeInternal {
@@ -96,6 +97,7 @@ PROTOBUF_CONSTEXPR AppendEntriesRequest::AppendEntriesRequest(
   , /*decltype(_impl_.leader_dev_index_)*/0
   , /*decltype(_impl_.data_already_copied_)*/false
   , /*decltype(_impl_.need_extent_map_)*/false
+  , /*decltype(_impl_.inline_entries_)*/false
   , /*decltype(_impl_._cached_size_)*/{}} {}
 struct AppendEntriesRequestDefaultTypeInternal {
   PROTOBUF_CONSTEXPR AppendEntriesRequestDefaultTypeInternal()
@@ -370,6 +372,7 @@ const uint32_t TableStruct_rpcproto_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE
   ~0u,  // no _inlined_string_donated_
   PROTOBUF_FIELD_OFFSET(::rpcproto::EntryMeta, _impl_.term_),
   PROTOBUF_FIELD_OFFSET(::rpcproto::EntryMeta, _impl_.cmd_len_),
+  PROTOBUF_FIELD_OFFSET(::rpcproto::EntryMeta, _impl_.command_),
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::rpcproto::RequestVoteRequest, _internal_metadata_),
   ~0u,  // no _extensions_
@@ -407,6 +410,7 @@ const uint32_t TableStruct_rpcproto_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE
   PROTOBUF_FIELD_OFFSET(::rpcproto::AppendEntriesRequest, _impl_.leader_dev_index_),
   PROTOBUF_FIELD_OFFSET(::rpcproto::AppendEntriesRequest, _impl_.data_already_copied_),
   PROTOBUF_FIELD_OFFSET(::rpcproto::AppendEntriesRequest, _impl_.need_extent_map_),
+  PROTOBUF_FIELD_OFFSET(::rpcproto::AppendEntriesRequest, _impl_.inline_entries_),
   PROTOBUF_FIELD_OFFSET(::rpcproto::AppendEntriesRequest, _impl_.entry_metas_),
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::rpcproto::AppendEntriesResponse, _internal_metadata_),
@@ -562,24 +566,24 @@ const uint32_t TableStruct_rpcproto_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE
 static const ::_pbi::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
   { 0, -1, -1, sizeof(::rpcproto::RingExtent)},
   { 9, -1, -1, sizeof(::rpcproto::EntryMeta)},
-  { 17, -1, -1, sizeof(::rpcproto::RequestVoteRequest)},
-  { 27, -1, -1, sizeof(::rpcproto::RequestVoteResponse)},
-  { 35, -1, -1, sizeof(::rpcproto::AppendEntriesRequest)},
-  { 55, -1, -1, sizeof(::rpcproto::AppendEntriesResponse)},
-  { 76, -1, -1, sizeof(::rpcproto::WritePBABatchRequest)},
-  { 88, -1, -1, sizeof(::rpcproto::WritePBABatchResponse)},
-  { 98, -1, -1, sizeof(::rpcproto::ClientApplyRequest)},
-  { 105, -1, -1, sizeof(::rpcproto::ClientApplyResponse)},
-  { 115, -1, -1, sizeof(::rpcproto::ClientApplyTimedRequest)},
-  { 122, -1, -1, sizeof(::rpcproto::ClientApplyTimedResponse)},
-  { 146, -1, -1, sizeof(::rpcproto::ClientEchoRequest)},
-  { 153, -1, -1, sizeof(::rpcproto::ClientEchoResponse)},
-  { 160, -1, -1, sizeof(::rpcproto::ClientGetCommitIndexRequest)},
-  { 166, -1, -1, sizeof(::rpcproto::ClientGetCommitIndexResponse)},
-  { 174, -1, -1, sizeof(::rpcproto::ClientGetHashRequest)},
-  { 181, -1, -1, sizeof(::rpcproto::ClientGetHashResponse)},
-  { 190, -1, -1, sizeof(::rpcproto::ClientGetAEBatchStatsRequest)},
-  { 196, -1, -1, sizeof(::rpcproto::ClientGetAEBatchStatsResponse)},
+  { 18, -1, -1, sizeof(::rpcproto::RequestVoteRequest)},
+  { 28, -1, -1, sizeof(::rpcproto::RequestVoteResponse)},
+  { 36, -1, -1, sizeof(::rpcproto::AppendEntriesRequest)},
+  { 57, -1, -1, sizeof(::rpcproto::AppendEntriesResponse)},
+  { 78, -1, -1, sizeof(::rpcproto::WritePBABatchRequest)},
+  { 90, -1, -1, sizeof(::rpcproto::WritePBABatchResponse)},
+  { 100, -1, -1, sizeof(::rpcproto::ClientApplyRequest)},
+  { 107, -1, -1, sizeof(::rpcproto::ClientApplyResponse)},
+  { 117, -1, -1, sizeof(::rpcproto::ClientApplyTimedRequest)},
+  { 124, -1, -1, sizeof(::rpcproto::ClientApplyTimedResponse)},
+  { 148, -1, -1, sizeof(::rpcproto::ClientEchoRequest)},
+  { 155, -1, -1, sizeof(::rpcproto::ClientEchoResponse)},
+  { 162, -1, -1, sizeof(::rpcproto::ClientGetCommitIndexRequest)},
+  { 168, -1, -1, sizeof(::rpcproto::ClientGetCommitIndexResponse)},
+  { 176, -1, -1, sizeof(::rpcproto::ClientGetHashRequest)},
+  { 183, -1, -1, sizeof(::rpcproto::ClientGetHashResponse)},
+  { 192, -1, -1, sizeof(::rpcproto::ClientGetAEBatchStatsRequest)},
+  { 198, -1, -1, sizeof(::rpcproto::ClientGetAEBatchStatsResponse)},
 };
 
 static const ::_pb::Message* const file_default_instances[] = {
@@ -608,68 +612,69 @@ static const ::_pb::Message* const file_default_instances[] = {
 const char descriptor_table_protodef_rpcproto_2eproto[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) =
   "\n\016rpcproto.proto\022\010rpcproto\"\?\n\nRingExtent"
   "\022\017\n\007logical\030\001 \001(\003\022\020\n\010physical\030\002 \001(\004\022\016\n\006l"
-  "ength\030\003 \001(\004\"*\n\tEntryMeta\022\014\n\004term\030\001 \001(\004\022\017"
-  "\n\007cmd_len\030\002 \001(\004\"g\n\022RequestVoteRequest\022\014\n"
-  "\004term\030\001 \001(\004\022\024\n\014candidate_id\030\002 \001(\004\022\026\n\016las"
-  "t_log_index\030\003 \001(\004\022\025\n\rlast_log_term\030\004 \001(\004"
-  "\"9\n\023RequestVoteResponse\022\014\n\004term\030\001 \001(\004\022\024\n"
-  "\014vote_granted\030\002 \001(\010\"\353\002\n\024AppendEntriesReq"
-  "uest\022\014\n\004term\030\001 \001(\004\022\021\n\tleader_id\030\002 \001(\004\022\026\n"
-  "\016prev_log_index\030\003 \001(\004\022\025\n\rprev_log_term\030\004"
-  " \001(\004\022\025\n\rleader_commit\030\005 \001(\004\022\026\n\016leader_pb"
-  "a_src\030\006 \001(\004\022\030\n\020log_block_length\030\007 \001(\004\022\023\n"
-  "\013num_entries\030\010 \001(\004\022\027\n\017slots_per_entry\030\t "
-  "\001(\004\022\022\n\nstart_slot\030\n \001(\004\022\030\n\020leader_dev_in"
-  "dex\030\013 \001(\005\022\033\n\023data_already_copied\030\r \001(\010\022\027"
-  "\n\017need_extent_map\030\016 \001(\010\022(\n\013entry_metas\030\014"
-  " \003(\0132\023.rpcproto.EntryMeta\"\266\003\n\025AppendEntr"
-  "iesResponse\022\014\n\004term\030\001 \001(\004\022\017\n\007success\030\002 \001"
-  "(\010\022\025\n\rconflict_term\030\003 \001(\004\022\026\n\016conflict_in"
-  "dex\030\004 \001(\004\022\036\n\026handler_duration_nanos\030\005 \001("
-  "\003\022\032\n\022write_pba_rt_nanos\030\006 \001(\003\022\032\n\022storage"
-  "_copy_nanos\030\007 \001(\003\022!\n\031handle_ae_lock_wait"
-  "_nanos\030\010 \001(\003\022\033\n\023handle_ae_pre_nanos\030\t \001("
-  "\003\022\"\n\032handle_ae_lock_wait2_nanos\030\n \001(\003\022\034\n"
-  "\024handle_ae_post_nanos\030\013 \001(\003\022\037\n\027handle_ae"
-  "_persist_nanos\030\014 \001(\003\022\025\n\rpush_map_hash\030\r "
-  "\001(\004\022(\n\nextent_map\030\016 \003(\0132\024.rpcproto.RingE"
-  "xtent\022\023\n\013volume_wwid\030\017 \001(\t\"\200\001\n\024WritePBAB"
-  "atchRequest\022\020\n\010pba_srcs\030\001 \003(\004\022\020\n\010pba_dst"
-  "s\030\002 \003(\004\022\016\n\006nbytes\030\003 \003(\004\022\022\n\nblock_size\030\004 "
-  "\001(\004\022\017\n\007src_dev\030\005 \001(\005\022\017\n\007dst_dev\030\006 \001(\005\"a\n"
-  "\025WritePBABatchResponse\022\013\n\003err\030\001 \001(\t\022\022\n\nc"
-  "opy_nanos\030\002 \001(\003\022\022\n\nread_nanos\030\003 \001(\003\022\023\n\013w"
-  "rite_nanos\030\004 \001(\003\"&\n\022ClientApplyRequest\022\020"
-  "\n\010commands\030\001 \003(\014\"_\n\023ClientApplyResponse\022"
-  "\013\n\003err\030\001 \001(\t\022\014\n\004busy\030\002 \001(\010\022\026\n\016retry_afte"
-  "r_ms\030\003 \001(\005\022\025\n\rlatency_nanos\030\004 \001(\003\"+\n\027Cli"
-  "entApplyTimedRequest\022\020\n\010commands\030\001 \003(\014\"\273"
-  "\003\n\030ClientApplyTimedResponse\022\013\n\003err\030\001 \001(\t"
-  "\022\027\n\017l_handler_nanos\030\002 \001(\003\022\027\n\017l_persist_n"
-  "anos\030\003 \001(\003\022\024\n\014ae_net_nanos\030\004 \001(\003\022\027\n\017f_ha"
-  "ndler_nanos\030\005 \001(\003\022\026\n\016repl_net_nanos\030\006 \001("
-  "\003\022\031\n\021replication_nanos\030\007 \001(\003\022\031\n\021quorum_w"
-  "ait_nanos\030\010 \001(\003\022\023\n\013mutex_nanos\030\t \001(\003\022\023\n\013"
-  "total_nanos\030\n \001(\003\022\014\n\004busy\030\013 \001(\010\022\026\n\016retry"
-  "_after_ms\030\014 \001(\005\022\026\n\016post_rpc_nanos\030\r \001(\003\022"
-  "\031\n\021commit_wait_nanos\030\016 \001(\003\022\033\n\023wg_schedul"
-  "ing_nanos\030\017 \001(\003\022\025\n\rmutex_a_nanos\030\020 \001(\003\022\025"
-  "\n\rmutex_b_nanos\030\021 \001(\003\022\025\n\rmutex_c_nanos\030\022"
-  " \001(\003\"%\n\021ClientEchoRequest\022\020\n\010commands\030\001 "
-  "\003(\014\"\037\n\022ClientEchoResponse\022\t\n\001n\030\001 \001(\003\"\035\n\033"
-  "ClientGetCommitIndexRequest\"A\n\034ClientGet"
-  "CommitIndexResponse\022\024\n\014commit_index\030\001 \001("
-  "\004\022\013\n\003err\030\002 \001(\t\"(\n\024ClientGetHashRequest\022\020"
-  "\n\010at_count\030\001 \001(\004\"A\n\025ClientGetHashRespons"
-  "e\022\014\n\004hash\030\001 \001(\t\022\r\n\005count\030\002 \001(\004\022\013\n\003err\030\003 "
-  "\001(\t\"\036\n\034ClientGetAEBatchStatsRequest\"R\n\035C"
-  "lientGetAEBatchStatsResponse\022\020\n\010ae_count"
-  "\030\001 \001(\004\022\022\n\nae_entries\030\002 \001(\004\022\013\n\003err\030\003 \001(\tB"
-  "\026Z\024nvmeof_raft/rpcprotob\006proto3"
+  "ength\030\003 \001(\004\";\n\tEntryMeta\022\014\n\004term\030\001 \001(\004\022\017"
+  "\n\007cmd_len\030\002 \001(\004\022\017\n\007command\030\003 \001(\014\"g\n\022Requ"
+  "estVoteRequest\022\014\n\004term\030\001 \001(\004\022\024\n\014candidat"
+  "e_id\030\002 \001(\004\022\026\n\016last_log_index\030\003 \001(\004\022\025\n\rla"
+  "st_log_term\030\004 \001(\004\"9\n\023RequestVoteResponse"
+  "\022\014\n\004term\030\001 \001(\004\022\024\n\014vote_granted\030\002 \001(\010\"\203\003\n"
+  "\024AppendEntriesRequest\022\014\n\004term\030\001 \001(\004\022\021\n\tl"
+  "eader_id\030\002 \001(\004\022\026\n\016prev_log_index\030\003 \001(\004\022\025"
+  "\n\rprev_log_term\030\004 \001(\004\022\025\n\rleader_commit\030\005"
+  " \001(\004\022\026\n\016leader_pba_src\030\006 \001(\004\022\030\n\020log_bloc"
+  "k_length\030\007 \001(\004\022\023\n\013num_entries\030\010 \001(\004\022\027\n\017s"
+  "lots_per_entry\030\t \001(\004\022\022\n\nstart_slot\030\n \001(\004"
+  "\022\030\n\020leader_dev_index\030\013 \001(\005\022\033\n\023data_alrea"
+  "dy_copied\030\r \001(\010\022\027\n\017need_extent_map\030\016 \001(\010"
+  "\022\026\n\016inline_entries\030\017 \001(\010\022(\n\013entry_metas\030"
+  "\014 \003(\0132\023.rpcproto.EntryMeta\"\266\003\n\025AppendEnt"
+  "riesResponse\022\014\n\004term\030\001 \001(\004\022\017\n\007success\030\002 "
+  "\001(\010\022\025\n\rconflict_term\030\003 \001(\004\022\026\n\016conflict_i"
+  "ndex\030\004 \001(\004\022\036\n\026handler_duration_nanos\030\005 \001"
+  "(\003\022\032\n\022write_pba_rt_nanos\030\006 \001(\003\022\032\n\022storag"
+  "e_copy_nanos\030\007 \001(\003\022!\n\031handle_ae_lock_wai"
+  "t_nanos\030\010 \001(\003\022\033\n\023handle_ae_pre_nanos\030\t \001"
+  "(\003\022\"\n\032handle_ae_lock_wait2_nanos\030\n \001(\003\022\034"
+  "\n\024handle_ae_post_nanos\030\013 \001(\003\022\037\n\027handle_a"
+  "e_persist_nanos\030\014 \001(\003\022\025\n\rpush_map_hash\030\r"
+  " \001(\004\022(\n\nextent_map\030\016 \003(\0132\024.rpcproto.Ring"
+  "Extent\022\023\n\013volume_wwid\030\017 \001(\t\"\200\001\n\024WritePBA"
+  "BatchRequest\022\020\n\010pba_srcs\030\001 \003(\004\022\020\n\010pba_ds"
+  "ts\030\002 \003(\004\022\016\n\006nbytes\030\003 \003(\004\022\022\n\nblock_size\030\004"
+  " \001(\004\022\017\n\007src_dev\030\005 \001(\005\022\017\n\007dst_dev\030\006 \001(\005\"a"
+  "\n\025WritePBABatchResponse\022\013\n\003err\030\001 \001(\t\022\022\n\n"
+  "copy_nanos\030\002 \001(\003\022\022\n\nread_nanos\030\003 \001(\003\022\023\n\013"
+  "write_nanos\030\004 \001(\003\"&\n\022ClientApplyRequest\022"
+  "\020\n\010commands\030\001 \003(\014\"_\n\023ClientApplyResponse"
+  "\022\013\n\003err\030\001 \001(\t\022\014\n\004busy\030\002 \001(\010\022\026\n\016retry_aft"
+  "er_ms\030\003 \001(\005\022\025\n\rlatency_nanos\030\004 \001(\003\"+\n\027Cl"
+  "ientApplyTimedRequest\022\020\n\010commands\030\001 \003(\014\""
+  "\273\003\n\030ClientApplyTimedResponse\022\013\n\003err\030\001 \001("
+  "\t\022\027\n\017l_handler_nanos\030\002 \001(\003\022\027\n\017l_persist_"
+  "nanos\030\003 \001(\003\022\024\n\014ae_net_nanos\030\004 \001(\003\022\027\n\017f_h"
+  "andler_nanos\030\005 \001(\003\022\026\n\016repl_net_nanos\030\006 \001"
+  "(\003\022\031\n\021replication_nanos\030\007 \001(\003\022\031\n\021quorum_"
+  "wait_nanos\030\010 \001(\003\022\023\n\013mutex_nanos\030\t \001(\003\022\023\n"
+  "\013total_nanos\030\n \001(\003\022\014\n\004busy\030\013 \001(\010\022\026\n\016retr"
+  "y_after_ms\030\014 \001(\005\022\026\n\016post_rpc_nanos\030\r \001(\003"
+  "\022\031\n\021commit_wait_nanos\030\016 \001(\003\022\033\n\023wg_schedu"
+  "ling_nanos\030\017 \001(\003\022\025\n\rmutex_a_nanos\030\020 \001(\003\022"
+  "\025\n\rmutex_b_nanos\030\021 \001(\003\022\025\n\rmutex_c_nanos\030"
+  "\022 \001(\003\"%\n\021ClientEchoRequest\022\020\n\010commands\030\001"
+  " \003(\014\"\037\n\022ClientEchoResponse\022\t\n\001n\030\001 \001(\003\"\035\n"
+  "\033ClientGetCommitIndexRequest\"A\n\034ClientGe"
+  "tCommitIndexResponse\022\024\n\014commit_index\030\001 \001"
+  "(\004\022\013\n\003err\030\002 \001(\t\"(\n\024ClientGetHashRequest\022"
+  "\020\n\010at_count\030\001 \001(\004\"A\n\025ClientGetHashRespon"
+  "se\022\014\n\004hash\030\001 \001(\t\022\r\n\005count\030\002 \001(\004\022\013\n\003err\030\003"
+  " \001(\t\"\036\n\034ClientGetAEBatchStatsRequest\"R\n\035"
+  "ClientGetAEBatchStatsResponse\022\020\n\010ae_coun"
+  "t\030\001 \001(\004\022\022\n\nae_entries\030\002 \001(\004\022\013\n\003err\030\003 \001(\t"
+  "B\026Z\024nvmeof_raft/rpcprotob\006proto3"
   ;
 static ::_pbi::once_flag descriptor_table_rpcproto_2eproto_once;
 const ::_pbi::DescriptorTable descriptor_table_rpcproto_2eproto = {
-    false, false, 2391, descriptor_table_protodef_rpcproto_2eproto,
+    false, false, 2432, descriptor_table_protodef_rpcproto_2eproto,
     "rpcproto.proto",
     &descriptor_table_rpcproto_2eproto_once, nullptr, 0, 20,
     schemas, file_default_instances, TableStruct_rpcproto_2eproto::offsets,
@@ -935,11 +940,20 @@ EntryMeta::EntryMeta(const EntryMeta& from)
   : ::PROTOBUF_NAMESPACE_ID::Message() {
   EntryMeta* const _this = this; (void)_this;
   new (&_impl_) Impl_{
-      decltype(_impl_.term_){}
+      decltype(_impl_.command_){}
+    , decltype(_impl_.term_){}
     , decltype(_impl_.cmd_len_){}
     , /*decltype(_impl_._cached_size_)*/{}};
 
   _internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
+  _impl_.command_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.command_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_command().empty()) {
+    _this->_impl_.command_.Set(from._internal_command(), 
+      _this->GetArenaForAllocation());
+  }
   ::memcpy(&_impl_.term_, &from._impl_.term_,
     static_cast<size_t>(reinterpret_cast<char*>(&_impl_.cmd_len_) -
     reinterpret_cast<char*>(&_impl_.term_)) + sizeof(_impl_.cmd_len_));
@@ -951,10 +965,15 @@ inline void EntryMeta::SharedCtor(
   (void)arena;
   (void)is_message_owned;
   new (&_impl_) Impl_{
-      decltype(_impl_.term_){uint64_t{0u}}
+      decltype(_impl_.command_){}
+    , decltype(_impl_.term_){uint64_t{0u}}
     , decltype(_impl_.cmd_len_){uint64_t{0u}}
     , /*decltype(_impl_._cached_size_)*/{}
   };
+  _impl_.command_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.command_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
 }
 
 EntryMeta::~EntryMeta() {
@@ -968,6 +987,7 @@ EntryMeta::~EntryMeta() {
 
 inline void EntryMeta::SharedDtor() {
   GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.command_.Destroy();
 }
 
 void EntryMeta::SetCachedSize(int size) const {
@@ -980,6 +1000,7 @@ void EntryMeta::Clear() {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
+  _impl_.command_.ClearToEmpty();
   ::memset(&_impl_.term_, 0, static_cast<size_t>(
       reinterpret_cast<char*>(&_impl_.cmd_len_) -
       reinterpret_cast<char*>(&_impl_.term_)) + sizeof(_impl_.cmd_len_));
@@ -1004,6 +1025,15 @@ const char* EntryMeta::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx
       case 2:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
           _impl_.cmd_len_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bytes command = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 26)) {
+          auto str = _internal_mutable_command();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -1049,6 +1079,12 @@ uint8_t* EntryMeta::_InternalSerialize(
     target = ::_pbi::WireFormatLite::WriteUInt64ToArray(2, this->_internal_cmd_len(), target);
   }
 
+  // bytes command = 3;
+  if (!this->_internal_command().empty()) {
+    target = stream->WriteBytesMaybeAliased(
+        3, this->_internal_command(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = ::_pbi::WireFormat::InternalSerializeUnknownFieldsToArray(
         _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance), target, stream);
@@ -1064,6 +1100,13 @@ size_t EntryMeta::ByteSizeLong() const {
   uint32_t cached_has_bits = 0;
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
+
+  // bytes command = 3;
+  if (!this->_internal_command().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_command());
+  }
 
   // uint64 term = 1;
   if (this->_internal_term() != 0) {
@@ -1093,6 +1136,9 @@ void EntryMeta::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROT
   uint32_t cached_has_bits = 0;
   (void) cached_has_bits;
 
+  if (!from._internal_command().empty()) {
+    _this->_internal_set_command(from._internal_command());
+  }
   if (from._internal_term() != 0) {
     _this->_internal_set_term(from._internal_term());
   }
@@ -1115,7 +1161,13 @@ bool EntryMeta::IsInitialized() const {
 
 void EntryMeta::InternalSwap(EntryMeta* other) {
   using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.command_, lhs_arena,
+      &other->_impl_.command_, rhs_arena
+  );
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
       PROTOBUF_FIELD_OFFSET(EntryMeta, _impl_.cmd_len_)
       + sizeof(EntryMeta::_impl_.cmd_len_)
@@ -1630,12 +1682,13 @@ AppendEntriesRequest::AppendEntriesRequest(const AppendEntriesRequest& from)
     , decltype(_impl_.leader_dev_index_){}
     , decltype(_impl_.data_already_copied_){}
     , decltype(_impl_.need_extent_map_){}
+    , decltype(_impl_.inline_entries_){}
     , /*decltype(_impl_._cached_size_)*/{}};
 
   _internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
   ::memcpy(&_impl_.term_, &from._impl_.term_,
-    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.need_extent_map_) -
-    reinterpret_cast<char*>(&_impl_.term_)) + sizeof(_impl_.need_extent_map_));
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.inline_entries_) -
+    reinterpret_cast<char*>(&_impl_.term_)) + sizeof(_impl_.inline_entries_));
   // @@protoc_insertion_point(copy_constructor:rpcproto.AppendEntriesRequest)
 }
 
@@ -1658,6 +1711,7 @@ inline void AppendEntriesRequest::SharedCtor(
     , decltype(_impl_.leader_dev_index_){0}
     , decltype(_impl_.data_already_copied_){false}
     , decltype(_impl_.need_extent_map_){false}
+    , decltype(_impl_.inline_entries_){false}
     , /*decltype(_impl_._cached_size_)*/{}
   };
 }
@@ -1688,8 +1742,8 @@ void AppendEntriesRequest::Clear() {
 
   _impl_.entry_metas_.Clear();
   ::memset(&_impl_.term_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&_impl_.need_extent_map_) -
-      reinterpret_cast<char*>(&_impl_.term_)) + sizeof(_impl_.need_extent_map_));
+      reinterpret_cast<char*>(&_impl_.inline_entries_) -
+      reinterpret_cast<char*>(&_impl_.term_)) + sizeof(_impl_.inline_entries_));
   _internal_metadata_.Clear<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
 }
 
@@ -1816,6 +1870,14 @@ const char* AppendEntriesRequest::_InternalParse(const char* ptr, ::_pbi::ParseC
         } else
           goto handle_unusual;
         continue;
+      // bool inline_entries = 15;
+      case 15:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 120)) {
+          _impl_.inline_entries_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -1931,6 +1993,12 @@ uint8_t* AppendEntriesRequest::_InternalSerialize(
     target = ::_pbi::WireFormatLite::WriteBoolToArray(14, this->_internal_need_extent_map(), target);
   }
 
+  // bool inline_entries = 15;
+  if (this->_internal_inline_entries() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(15, this->_internal_inline_entries(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = ::_pbi::WireFormat::InternalSerializeUnknownFieldsToArray(
         _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance), target, stream);
@@ -2019,6 +2087,11 @@ size_t AppendEntriesRequest::ByteSizeLong() const {
     total_size += 1 + 1;
   }
 
+  // bool inline_entries = 15;
+  if (this->_internal_inline_entries() != 0) {
+    total_size += 1 + 1;
+  }
+
   return MaybeComputeUnknownFieldsSize(total_size, &_impl_._cached_size_);
 }
 
@@ -2077,6 +2150,9 @@ void AppendEntriesRequest::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, c
   if (from._internal_need_extent_map() != 0) {
     _this->_internal_set_need_extent_map(from._internal_need_extent_map());
   }
+  if (from._internal_inline_entries() != 0) {
+    _this->_internal_set_inline_entries(from._internal_inline_entries());
+  }
   _this->_internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
 }
 
@@ -2096,8 +2172,8 @@ void AppendEntriesRequest::InternalSwap(AppendEntriesRequest* other) {
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
   _impl_.entry_metas_.InternalSwap(&other->_impl_.entry_metas_);
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(AppendEntriesRequest, _impl_.need_extent_map_)
-      + sizeof(AppendEntriesRequest::_impl_.need_extent_map_)
+      PROTOBUF_FIELD_OFFSET(AppendEntriesRequest, _impl_.inline_entries_)
+      + sizeof(AppendEntriesRequest::_impl_.inline_entries_)
       - PROTOBUF_FIELD_OFFSET(AppendEntriesRequest, _impl_.term_)>(
           reinterpret_cast<char*>(&_impl_.term_),
           reinterpret_cast<char*>(&other->_impl_.term_));

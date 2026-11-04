@@ -225,8 +225,8 @@ void Server::handle_append_entries_request(const AppendEntriesRequest &req,
          *  readback." */
     }
 
-    /* Storage-level block copy + in-memory log build */
-    if (req.num_entries > 0 && req.leader_pba_src != 0) {
+    /* Storage-level block copy (또는 정상경로의 직접 쓰기) + in-memory log build */
+    if (req.num_entries > 0 && (req.inline_entries || req.leader_pba_src != 0)) {
         /* "Sync follower tailSlot to leader's StartSlot." */
         if (ring.tail_slot != req.start_slot) {
             ring.tail_slot = req.start_slot;
@@ -242,7 +242,23 @@ void Server::handle_append_entries_request(const AppendEntriesRequest &req,
          * (Destination-Side의 기본 동작만 아래 do_pba_copy 실행). */
         DoPbaCopyResult copy_result{};
         bool copy_failed = false;
-        if (!req.data_already_copied) {
+        if (req.inline_entries) {
+            /* 정상경로 (ReplicationMode::Normal, DECISIONS.md D22): 리더가 실어 보낸
+             * 명령 바이트를 내가 직접 같은 슬롯에 쓴다. do_pba_copy와 같은 자리,
+             * 같은 unlock/relock, 같은 fail-soft. 측정값은 destination의 StorageIO와
+             * 같은 칸에 넣어 apply-timed 분해를 나란히 비교할 수 있게 한다. */
+            mu.unlock();
+            try {
+                FollowerWriteResult w = persist_follower_entries(old_tail_slot, req);
+                const int64_t io_ns = w.write_ns + w.sync_ns;
+                copy_result = DoPbaCopyResult{io_ns, io_ns, 0, w.write_ns};
+            } catch (const std::exception &) {
+                copy_failed = true;
+            }
+            auto t_lock2 = clock_type::now();
+            mu.lock();
+            handle_ae_lock_wait2 = elapsed_ns(t_lock2);
+        } else if (!req.data_already_copied) {
             mu.unlock();
 
             /* "PBA copy for durability -- data lands on device for crash
@@ -286,6 +302,13 @@ void Server::handle_append_entries_request(const AppendEntriesRequest &req,
                      * device에서 lazy load */
                     e.ring_slot = ring.tail_slot;
                     e.cmd_len = meta.cmd_len;
+                    /* 정상경로: 슬롯 0에 놓인 엔트리는 명령을 메모리에 남긴다.
+                     * ring_slot == 0 이 "deferred 아님"의 표식이라, 비워 두면
+                     * 승격 때 로드되지 않고 빈 명령으로 apply된다 (DECISIONS.md D22).
+                     * PBA 경로에도 같은 모호성이 있다 -- U13. */
+                    if (req.inline_entries && e.ring_slot == 0) {
+                        e.command = meta.command;
+                    }
                     raft.log.push_back(std::move(e));
 
                     /* 팔로워는 log_slot_map을 **채우지 않는다.** 슬롯 수만

@@ -21,10 +21,12 @@ POOL=(
     "1|10.0.0.1:6000|115.145.173.242:6000|/dev/nvme1n2|/dev/nvme7n1"
     "2|10.0.0.2:6000|115.145.173.244:6000|/dev/nvme1n1|/dev/nvme8n1"      # IPoIB 케이블 비정상 -> tcp(Ethernet)만
     "3|10.0.0.3:6000|115.145.173.245:6000|/dev/nvme1n1|/dev/nvme0n1"      # IPoIB 케이블 비정상 -> tcp(Ethernet)만
-    "4|10.0.0.4:6000|115.145.173.123:6000|/dev/nvme1n1|/dev/nvme1n1"
-    "5|10.0.0.5:6000|115.145.173.124:6000|/dev/nvme1n1|/dev/nvme3n1"
-    "6|10.0.0.6:6000|115.145.173.125:6000|/dev/nvme1n1|/dev/nvme5n1"
+    "4|10.0.0.4:6000|115.145.173.123:6000|/dev/nvme1n1|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509494"
+    "5|10.0.0.5:6000|115.145.173.124:6000|/dev/nvme1n1|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509496"
+    "6|10.0.0.6:6000|115.145.173.125:6000|/dev/nvme1n1|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509484"
 )
+# storage_dev(4,5,6)는 by-id 시리얼이다. 스토리지 재부팅(2026-10-28) 뒤 nvmeN 번호가
+#   바뀌어 예전 nvme1n1/3n1/5n1 은 무관한 디스크가 됐다. nvmet 의 device_path 와 같은 경로를 쓴다.
 # 출처: 사용자 제공 인벤토리 (eternityN = raft id N, raft 포트 6000).
 #   storage_dev = 스토리지 서버(115.145.173.243)에서 본 "Remote Storage" 디바이스.
 #   compute_dev = 각 컴퓨트 노드에서 자기 볼륨이 보이는 디바이스 ("Local" = 컴퓨트 관점).

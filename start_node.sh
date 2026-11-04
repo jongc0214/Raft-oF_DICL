@@ -27,10 +27,10 @@ is_valid_id "$ID" || {
 }
 
 case "$MODE" in
-    destination|leader|push) ;;
+    destination|leader|push|normal) ;;
     *)
         echo "invalid mode: $MODE"
-        echo "valid modes: destination, leader, push"
+        echo "valid modes: destination, leader, push, normal"
         exit 1
         ;;
 esac
@@ -109,6 +109,9 @@ if [[ "$RING_PRECONDITION" == "1" ]]; then
     PRECONDITION_ARGS+=("-precondition-ring")
 fi
 
+# EXTRA_ARGS: 맨 뒤에 덧붙일 raft_node 옵션 (예: EXTRA_ARGS="-debug -sm hash").
+# 뒤에 온 값이 이기므로 아래 고정값(-sm noop 등)도 여기서 덮어쓸 수 있다.
+read -r -a EXTRA_ARR <<< "${EXTRA_ARGS:-}"
 
 sudo stdbuf -oL -eL ./build/raft_node \
     -id "$ID" \
@@ -126,6 +129,7 @@ sudo stdbuf -oL -eL ./build/raft_node \
     -gc-max-bytes "$MAX_GC_BYTES" \
     -profile \
     -sm noop \
+    "${EXTRA_ARR[@]}" \
     > "$LOG" 2>&1 &
 
 # -gc-max-reqs "$MAX_GC_REQ" \

@@ -39,9 +39,32 @@ for dev in "${BC_DEV_ARR[@]}"; do
     fi
 done
 
-if pgrep -f '[r]aft_blockcopy_server' >/dev/null; then
+# -devices[i] 는 NODES 의 i 번째 노드 볼륨이어야 한다. 어긋나면 블록 복사가 에러 없이
+# 다른 볼륨으로 간다. nvmet 서브시스템 node<ID> 가 내보내는 장치와 실제 장치가 같은지 확인한다.
+NVMET=/sys/kernel/config/nvmet/subsystems
+read -r -a NODE_ARR <<< "$NODES"
+for i in "${!NODE_ARR[@]}"; do
+    id="${NODE_ARR[$i]}"
+    dev="${BC_DEV_ARR[$i]}"
+    want=""
+    for dp in "$NVMET/node$id"/namespaces/*/device_path; do
+        [[ -r "$dp" ]] && want="$(readlink -f "$(cat "$dp")")"
+    done
+    have="$(readlink -f "$dev")"
+    if [[ -z "$want" ]]; then
+        echo "ERROR: nvmet subsystem node$id 의 device_path 를 읽지 못했다 ($NVMET/node$id)"
+        exit 1
+    fi
+    if [[ "$want" != "$have" ]]; then
+        echo "ERROR: node$id: -devices 의 $dev ($have) 가 nvmet node$id 의 장치($want)와 다르다 (env.sh POOL 확인)"
+        exit 1
+    fi
+    echo "node$id -> $dev ($have) == nvmet node$id OK"
+done
+
+if pgrep -f '^(\S*/)?raft_blockcopy_server( |$)' >/dev/null; then
     echo "ERROR: raft_blockcopy_server already running:"
-    pgrep -af '[r]aft_blockcopy_server'
+    pgrep -af '^(\S*/)?raft_blockcopy_server( |$)'
     exit 1
 fi
 
@@ -67,7 +90,7 @@ echo "blockcopy server started"
 echo "pid: $PID"
 
 echo
-pgrep -af '[r]aft_blockcopy_server' || true
+pgrep -af '^(\S*/)?raft_blockcopy_server( |$)' || true
 
 echo
 tail -30 "$LOG"

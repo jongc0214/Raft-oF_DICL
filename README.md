@@ -289,7 +289,7 @@ HTTP CONNECT + 길이 프레이밍, RDMA 는 SEND 메시지 하나가 프레임 
 | `-metadata-dir DIR` | `.` | 링 파일 위치 |
 | `-heartbeat-ms N` | 300 | 하트비트 주기. election timeout은 이것의 20~30배 |
 | `-transport rdma\|tcp` | **rdma** | Raft/blockcopy RPC 전송. rdma는 `-cluster`의 주소를 **IPoIB 주소**로 해석한다 |
-| `-mode destination\|leader` | destination | 복제 정책 |
+| `-mode destination\|leader\|push\|normal` | destination | 복제 정책. `normal` 은 AE에 명령 바이트를 싣고 팔로워가 직접 쓰는 교과서 Raft 기준선 (스토리지 노드 불필요, DECISIONS.md D22) |
 | `-ring-pages N` | 8388608 (32GiB) | 링 크기 (4KiB 페이지) |
 | `-profile` | off | 서브스테이지 프로파일링 (apply-timed에 필요) |
 | `-loop-sleep-us N` | 200 | 메인 루프 바퀴당 대기. `0` = 원본과 같은 스핀 |
