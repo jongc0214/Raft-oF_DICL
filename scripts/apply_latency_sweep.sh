@@ -31,6 +31,12 @@
 #                띄웠다면 **반드시 맞춰줄 것**
 #   WARMUP       1 이면 시작 시 워밍업 1회 (기본 1). 0 이면 건너뛴다
 #   WARMUP_SIZE / WARMUP_BATCH   워밍업 파라미터 (기본 4064 / 10)
+#   ENTRY_SIZES  1 이면 SIZES 와 WARMUP_SIZE 를 **32B 엔트리 헤더
+#                (ENTRY_META_SIZE) 를 포함한 엔트리 크기**로 읽는다 (기본 0 =
+#                헤더 미포함 명령 크기). 클라이언트 -size 에는 size - 32 를 넘기고,
+#                CSV size_bytes 와 로그 이름에는 엔트리 크기를 남긴다.
+#                32 이하 크기는 건너뛴다. WARMUP_SIZE 기본은 4096 이 된다
+#                (명령 4064B 로 기본과 같은 워밍업). size_breakdown_sweep.sh 가 켠다
 #   WARMUP_N     워밍업 명령 수 (기본: RING_BYTES 에서 링 1.2 바퀴로 유도)
 #   BUSY_WARN    busy_retries 가 이 값을 넘으면 경고 (기본 100)
 #
@@ -110,14 +116,29 @@ TIMEOUT_S="${TIMEOUT_S:-15}"
 
 RING_BYTES="${RING_BYTES:-$((16 * 1024 * 1024))}"
 WARMUP="${WARMUP:-1}"
-WARMUP_SIZE="${WARMUP_SIZE:-4064}"
 WARMUP_BATCH="${WARMUP_BATCH:-10}"
 BUSY_WARN="${BUSY_WARN:-100}"
 
-# 링 한 바퀴에 필요한 명령 수를 WARMUP_SIZE 에서 유도한다. 엔트리 하나가 먹는
-# 링 바이트 = ceil((32 + size) / 512) * 512 다 (slots_for_entry). 1.2 배를
+# ENTRY_SIZES=1 이면 SIZES / WARMUP_SIZE 가 헤더 포함 엔트리 크기다.
+# HDR = 크기에서 빼서 클라이언트 -size (명령 크기) 로 넘길 바이트 수.
+ENTRY_SIZES="${ENTRY_SIZES:-0}"
+if [ "$ENTRY_SIZES" = "1" ]; then
+    HDR=32      # core/include/raft_constants.h ENTRY_META_SIZE
+    WARMUP_SIZE="${WARMUP_SIZE:-4096}"
+else
+    HDR=0
+    WARMUP_SIZE="${WARMUP_SIZE:-4064}"
+fi
+if [ "$WARMUP_SIZE" -le "$HDR" ]; then
+    printf 'WARMUP_SIZE=%s must be > %s (entry header)\n' "$WARMUP_SIZE" "$HDR" >&2
+    exit 2
+fi
+WARMUP_CMD=$(( WARMUP_SIZE - HDR ))
+
+# 링 한 바퀴에 필요한 명령 수를 워밍업 명령 크기에서 유도한다. 엔트리 하나가
+# 먹는 링 바이트 = ceil((32 + cmd) / 512) * 512 다 (slots_for_entry). 1.2 배를
 # 곱해 한 바퀴를 확실히 넘긴다.
-warmup_slot_bytes=$(( ((32 + WARMUP_SIZE + 511) / 512) * 512 ))
+warmup_slot_bytes=$(( ((32 + WARMUP_CMD + 511) / 512) * 512 ))
 WARMUP_N="${WARMUP_N:-$(( (RING_BYTES / warmup_slot_bytes) * 12 / 10 + 1 ))}"
 
 CLIENT="$BIN/raft_client"
@@ -151,6 +172,11 @@ log "output -> $OUTDIR"
 printf '  addrs     : %s\n  transport : %s\n' \
     "$ADDRS" "$TRANSPORT"
 printf '  n         : %s   batch: %s   reps: %s\n' "$N" "$BATCH" "$REPS"
+if [ "$HDR" -gt 0 ]; then
+    printf '  sizes     : entry bytes incl. %sB header (client -size = size - %s)\n' "$HDR" "$HDR"
+else
+    printf '  sizes     : command bytes (entry = size + 32B header)\n'
+fi
 printf '  client    : %s\n' "$CLIENT"
 
 # ---------------------------------------------------------------------------
@@ -163,10 +189,14 @@ printf '  client    : %s\n' "$CLIENT"
 RDMA_MAX="${RDMA_MAX:-$((4 * 1024 * 1024))}"
 SWEEP_SIZES=""
 for size in $SIZES; do
+    if [ "$size" -le "$HDR" ]; then
+        warn "size=$(size_label "$size") <= entry header ${HDR}B -- empty command, skipping"
+        continue
+    fi
     if [ "$TRANSPORT" = "rdma" ]; then
-        need=$(( size * BATCH + BATCH * 8 + 64 ))
+        need=$(( (size - HDR) * BATCH + BATCH * 8 + 64 ))
         if [ "$need" -gt "$RDMA_MAX" ]; then
-            warn "size=$(size_label "$size") × batch=$BATCH = ${need}B > RDMA_MAX=${RDMA_MAX}B -- skipping"
+            warn "size=$(size_label "$size") × batch=$BATCH -> rpc frame ~${need}B > RDMA_MAX=${RDMA_MAX}B -- skipping"
             warn "  (이 크기를 보려면 BATCH 를 낮추거나 TRANSPORT=tcp)"
             continue
         fi
@@ -204,8 +234,8 @@ ok "$nreach/$naddrs nodes answered"
 # 워밍업 -- U11. 결과는 버린다
 # ---------------------------------------------------------------------------
 if [ "$WARMUP" != "0" ]; then
-    log "warmup: $WARMUP_N × ${WARMUP_SIZE}B (ring=${RING_BYTES}B, ~1.2 laps) -- discarded"
-    "$CLIENT" -addrs "$ADDRS" -op apply -n "$WARMUP_N" -size "$WARMUP_SIZE" \
+    log "warmup: $WARMUP_N × ${WARMUP_SIZE}B (cmd ${WARMUP_CMD}B, ring=${RING_BYTES}B, ~1.2 laps) -- discarded"
+    "$CLIENT" -addrs "$ADDRS" -op apply -n "$WARMUP_N" -size "$WARMUP_CMD" \
         -batch "$WARMUP_BATCH" -timeout-s "$TIMEOUT_S" -transport "$TRANSPORT" \
         > "$OUTDIR/warmup.log" 2>&1
     if [ $? -ne 0 ]; then
@@ -233,8 +263,9 @@ run_point() {
     local slabel
     slabel=$(size_label "$size")
     local plog="$OUTDIR/apply-timed-r${rep}-${size}.log"
+    local cmd=$(( size - HDR ))   # ENTRY_SIZES=1 이면 헤더를 뺀 명령 크기
 
-    "$CLIENT" -addrs "$ADDRS" -op apply-timed -n "$N" -size "$size" \
+    "$CLIENT" -addrs "$ADDRS" -op apply-timed -n "$N" -size "$cmd" \
         -batch "$BATCH" -timeout-s "$TIMEOUT_S" -transport "$TRANSPORT" \
         > "$plog" 2>&1
     local rc=$?

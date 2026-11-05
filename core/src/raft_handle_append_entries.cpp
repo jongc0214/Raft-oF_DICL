@@ -40,7 +40,7 @@ Server::DoPbaCopyResult Server::do_pba_copy(uint64_t leader_pba_src,
         throw std::runtime_error("do_pba_copy: no block copy client configured");
     }
 
-    uint64_t nbytes = align_up(log_block_length * SECTOR_SIZE, PAGE_SIZE);
+    uint64_t nbytes = align_up(log_block_length * SECTOR_SIZE, SECTOR_SIZE);
 
     /* Pass 1: destination 범위를 훑으며 (src, dst, chunk) 튜플들을
      * extent 경계 + ring wrap + MaxPBACopyChunkBytes 경계에서 분할.

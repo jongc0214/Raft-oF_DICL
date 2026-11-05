@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# size_breakdown_sweep.sh -- size_latency_sweep.sh 와 같은 조건(16B..1MiB 4배씩,
+# size_breakdown_sweep.sh -- size_latency_sweep.sh 와 같은 조건(64B..1MiB 4배씩,
 #                            N=10000, batch 1, 단일 클라이언트, 3회)으로 돌리되
 #                            ApplyTimings 항별 breakdown 까지 낸다
 #
@@ -17,7 +17,12 @@
 #
 # 환경변수: SIZES N REPS ADDRS TIMEOUT_S BIN RING_BYTES WARMUP ... 는
 # apply_latency_sweep.sh 로 그대로 넘어간다 (그 머리 주석 참고). 여기서 바꾸는
-# 기본값은 SIZES (16 .. 1M, 4배씩) 와 REPS (3) 뿐이다.
+# 기본값은 SIZES (64 .. 1M, 4배씩) 와 REPS (3) 뿐이다.
+#
+# **SIZES 는 32B 엔트리 헤더를 포함한 엔트리 크기다** (size_latency_sweep.sh 와
+# 같다). ENTRY_SIZES=1 로 apply_latency_sweep.sh 를 불러서 클라이언트에는
+# size - 32 를 명령 크기로 넘긴다. 예: 4096 -> 명령 4064B, 링 8 슬롯 = 4KiB.
+# 모든 CSV 의 size_bytes 도 엔트리 크기다. WARMUP_SIZE 도 엔트리 크기 (기본 4096).
 #
 # 출력 (출력디렉터리 안):
 #   latency.csv          apply_latency_sweep.sh 원본 (반복이 행으로 쌓여 있다)
@@ -63,9 +68,11 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 OUTDIR="${2:-$REPO/csv/lat_breakdown_${TRANSPORT}_$(date +%m%d-%H%M%S)}"
 
 export TRANSPORT
-export SIZES="${SIZES:-16 64 256 1024 4096 16384 65536 262144 1048576}"
+export ADDRS="${ADDRS:-10.0.0.4:6000,10.0.0.5:6000,10.0.0.6:6000}"
+export SIZES="${SIZES:-64 256 1024 4096 16384 65536 262144}"
+export ENTRY_SIZES=1   # SIZES 는 헤더 포함 엔트리 크기
 export REPS="${REPS:-3}"
-export N="${N:-10000}"
+export N="${N:-100000}"
 export BATCH=1
 
 "$REPO/scripts/apply_latency_sweep.sh" "$OUTDIR"

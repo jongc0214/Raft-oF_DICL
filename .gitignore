@@ -36,3 +36,4 @@ raft_node_5_destination_tcp.log
 raft_node_6_destination_tcp.log
 
 csv/
+*.nfs

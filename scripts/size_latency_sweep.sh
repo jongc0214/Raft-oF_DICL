@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# size_latency_sweep.sh -- 페이로드 크기를 16B 부터 4배씩 1MiB 까지 키우며
+# size_latency_sweep.sh -- 엔트리 크기를 64B 부터 4배씩 1MiB 까지 키우며
 #                          3-node Raft 의 end-to-end apply 지연을 잰다
 #                          (breakdown 없음)
 #
@@ -33,7 +33,11 @@
 # 환경변수:
 #   ADDRS        -addrs 주소 목록 (기본 10.0.0.4:6001,10.0.0.5:6001,10.0.0.6:6001)
 #                **IPoIB 주소여야 한다** -- rdma_cm 이 IP 로 장치를 찾는다
-#   SIZES        페이로드 바이트 목록 (기본 16 64 256 1K 4K 16K 64K 256K 1M)
+#   SIZES        **엔트리** 바이트 목록, 32B 엔트리 헤더(ENTRY_META_SIZE) 포함
+#                (기본 64 256 1K 4K 16K 64K 256K 1M). 클라이언트에는 헤더를 뺀
+#                명령 크기 (size - 32) 를 -size 로 넘긴다. 예: 4096 이면 명령
+#                4064B, 링에서 정확히 8 슬롯 = 4KiB 페이지 하나.
+#                32 이하는 명령이 비므로 건너뛴다
 #   N            지점당 명령 수 (기본 10000)
 #   REPS         지점당 반복 횟수 (기본 3). summary.csv 는 반복의 평균이다
 #   TIMEOUT_S    리더 탐색 타임아웃 (기본 15)
@@ -44,11 +48,13 @@
 #                워밍업 분량을 여기서 유도한다 -- 노드를 다른 -ring-pages 로
 #                띄웠다면 **반드시 맞춰줄 것**
 #   WARMUP       1 이면 시작 시 워밍업 1회 (기본 1). 결과는 버린다
-#   WARMUP_SIZE / WARMUP_BATCH   워밍업 파라미터 (기본 4064 / 10)
+#   WARMUP_SIZE / WARMUP_BATCH   워밍업 파라미터 (기본 4096 / 10).
+#                WARMUP_SIZE 도 헤더 포함 엔트리 크기다
 #   WARMUP_N     워밍업 명령 수 (기본: RING_BYTES 에서 링 1.2 바퀴로 유도)
 #   BUSY_WARN    busy_retries 가 이 값을 넘으면 경고 (기본 100)
 #
 # 출력:
+#   size_bytes 는 어느 CSV 에서나 헤더 포함 엔트리 크기다 (명령 = size_bytes - 32).
 #   raw.csv      transport,size_bytes,rep,n,srv_samples,srv_avg_us,srv_p50_us,
 #                srv_p95_us,srv_p99_us,wall_ms,client_us_per_cmd,busy_retries
 #   summary.csv  transport,size_bytes,size_label,reps,mean_us,min_us,max_us,stdev_us,
@@ -61,17 +67,17 @@
 # ── 읽기 전에 알 것 ───────────────────────────────────────────────────────
 #
 # **(1) RDMA 프레임 상한은 4MiB 다** (net/include/raft_rdma_transport.h:54).
-# ClientApply 요청은 페이로드를 그대로 싣고 protobuf/프레임 헤더가 붙으므로,
-# 페이로드가 4MiB 에 가까우면 encode_frame 에서 예외로 죽는다. preflight 가
+# ClientApply 요청은 명령 (size - 32) 을 그대로 싣고 protobuf/프레임 헤더가 붙으므로,
+# 명령이 4MiB 에 가까우면 encode_frame 에서 예외로 죽는다. preflight 가
 # 걸리는 크기를 빼고 경고한다. 기본 SIZES (최대 1MiB) 는 전부 들어간다.
 # **세 노드와 클라이언트가 모두 4MiB 로 빌드돼 있어야 한다** -- 노드가 옛
 # 1MiB 빌드면 1M 지점에서 서버 쪽 수신이 실패한다. kRdmaMaxMessageBytes 를
 # 다시 바꾸면 RDMA_MAX 도 맞출 것.
 #
-# **(2) 큰 페이로드는 링이 커야 한다.** 엔트리 하나가 먹는 슬롯은
-# ceil((32 + size) / 512) 이고 (core/src/raft_ring_helpers.cpp:13), 링이 작으면
+# **(2) 큰 엔트리는 링이 커야 한다.** 엔트리 하나가 먹는 슬롯은
+# ceil(size / 512) 이고 (size 가 이미 헤더 포함; core/src/raft_ring_helpers.cpp:13), 링이 작으면
 # 랩마다 GC 를 기다리다 busy 가 나서 지연 대신 백프레셔를 재게 된다.
-# 1MiB 는 엔트리당 2049 슬롯이라 -ring-pages 4096 (16MiB) 이면 한 랩에 15 개다.
+# 1MiB 는 엔트리당 2048 슬롯이라 -ring-pages 4096 (16MiB) 이면 한 랩에 16 개다.
 # 노드를 넉넉한 -ring-pages 로 띄울 것. busy_retries 가 큰 지점은 믿지 말 것.
 #
 # **(3) p50 / p99 는 서버 쪽 값만 있다.** 클라이언트는 RPC 별 서버 시간을
@@ -100,21 +106,29 @@ OUTDIR="${2:-$HOME/raftof_clean/csv/lat_size_${TRANSPORT}_$(date +%m%d-%H%M%S)}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="${BIN:-$REPO/build}"
 
-ADDRS="${ADDRS:-10.0.0.4:6001,10.0.0.5:6001,10.0.0.6:6001}"
-SIZES="${SIZES:-16 64 256 1024 4096 16384 65536 262144 1048576}"
-N="${N:-10000}"
+ADDRS="${ADDRS:-10.0.0.4:6000,10.0.0.5:6000,10.0.0.6:6000}"
+SIZES="${SIZES:-64 256 1024 4096 16384 65536 262144 1048576}"
+# 엔트리 헤더 크기 (core/include/raft_constants.h ENTRY_META_SIZE). SIZES 는
+# 이 헤더를 포함한 엔트리 크기이고, 클라이언트 -size 에는 이만큼 뺀 값을 넘긴다
+ENTRY_META=32
+N="${N:-1000000}"
 REPS="${REPS:-3}"
 TIMEOUT_S="${TIMEOUT_S:-15}"
 RDMA_MAX="${RDMA_MAX:-$((4 * 1024 * 1024))}"
 RING_BYTES="${RING_BYTES:-$((16 * 1024 * 1024))}"
 WARMUP="${WARMUP:-1}"
-WARMUP_SIZE="${WARMUP_SIZE:-4064}"
+WARMUP_SIZE="${WARMUP_SIZE:-4096}"
 WARMUP_BATCH="${WARMUP_BATCH:-10}"
 
-# 링 한 바퀴에 필요한 명령 수를 WARMUP_SIZE 에서 유도한다 (apply_latency_sweep.sh
-# 와 같은 식). 엔트리 하나가 먹는 링 바이트 = ceil((32 + size) / 512) * 512.
+# 링 한 바퀴에 필요한 명령 수를 WARMUP_SIZE 에서 유도한다. WARMUP_SIZE 는 헤더
+# 포함 엔트리 크기라 엔트리 하나가 먹는 링 바이트 = ceil(size / 512) * 512.
 # 1.2 배를 곱해 한 바퀴를 확실히 넘긴다.
-warmup_slot_bytes=$(( ((32 + WARMUP_SIZE + 511) / 512) * 512 ))
+if [ "$WARMUP_SIZE" -le "$ENTRY_META" ]; then
+    printf 'WARMUP_SIZE=%s must be > %s (entry header)\n' "$WARMUP_SIZE" "$ENTRY_META" >&2
+    exit 2
+fi
+WARMUP_CMD=$(( WARMUP_SIZE - ENTRY_META ))
+warmup_slot_bytes=$(( ((WARMUP_SIZE + 511) / 512) * 512 ))
 WARMUP_N="${WARMUP_N:-$(( (RING_BYTES / warmup_slot_bytes) * 12 / 10 + 1 ))}"
 BUSY_WARN="${BUSY_WARN:-100}"
 
@@ -151,14 +165,19 @@ printf '  n         : %s   batch: 1   reps: %s\n' "$N" "$REPS"
 printf '  client    : %s\n' "$CLIENT"
 
 # ---------------------------------------------------------------------------
-# preflight A -- RDMA 프레임 상한에 걸리는 크기를 뺀다 (머리 주석 (1))
+# preflight A -- 헤더보다 작은 크기와 RDMA 프레임 상한에 걸리는 크기를 뺀다
+#               (머리 주석 (1))
 # ---------------------------------------------------------------------------
 SWEEP_SIZES=""
 for size in $SIZES; do
+    if [ "$size" -le "$ENTRY_META" ]; then
+        warn "size=$(size_label "$size") <= entry header ${ENTRY_META}B -- empty command, skipping"
+        continue
+    fi
     if [ "$TRANSPORT" = "rdma" ]; then
-        need=$(( size + 8 + 64 ))
+        need=$(( size - ENTRY_META + 8 + 64 ))
         if [ "$need" -gt "$RDMA_MAX" ]; then
-            warn "size=$(size_label "$size") + header = ${need}B > RDMA_MAX=${RDMA_MAX}B -- skipping"
+            warn "size=$(size_label "$size") -> rpc frame ~${need}B > RDMA_MAX=${RDMA_MAX}B -- skipping"
             warn "  (kRdmaMaxMessageBytes 를 올려 재빌드하거나 tcp 로)"
             continue
         fi
@@ -195,8 +214,8 @@ ok "$nreach/$naddrs nodes answered"
 # 이라 한 바퀴까지는 필요 없지만, 해가 없으므로 기본으로 켜 둔다.
 # ---------------------------------------------------------------------------
 if [ "$WARMUP" != "0" ]; then
-    log "warmup: $WARMUP_N × ${WARMUP_SIZE}B (ring=${RING_BYTES}B, ~1.2 laps) -- discarded"
-    "$CLIENT" -addrs "$ADDRS" -op apply -n "$WARMUP_N" -size "$WARMUP_SIZE" \
+    log "warmup: $WARMUP_N × ${WARMUP_SIZE}B entry (cmd ${WARMUP_CMD}B, ring=${RING_BYTES}B, ~1.2 laps) -- discarded"
+    "$CLIENT" -addrs "$ADDRS" -op apply -n "$WARMUP_N" -size "$WARMUP_CMD" \
         -batch "$WARMUP_BATCH" -timeout-s "$TIMEOUT_S" -transport "$TRANSPORT" \
         > "$OUTDIR/warmup.log" 2>&1
     if [ $? -ne 0 ]; then
@@ -221,8 +240,9 @@ run_point() {
     local slabel
     slabel=$(size_label "$size")
     local plog="$OUTDIR/apply-r${rep}-${size}.log"
+    local cmd=$(( size - ENTRY_META ))   # 헤더 포함 엔트리 크기 -> 명령 크기
 
-    "$CLIENT" -addrs "$ADDRS" -op apply -n "$N" -size "$size" \
+    "$CLIENT" -addrs "$ADDRS" -op apply -n "$N" -size "$cmd" \
         -batch 1 -timeout-s "$TIMEOUT_S" -transport "$TRANSPORT" \
         > "$plog" 2>&1
     local rc=$?
@@ -271,7 +291,7 @@ run_point() {
     return 0
 }
 
-log "sweep: sizes =$(for s in $SWEEP_SIZES; do printf ' %s' "$(size_label "$s")"; done)"
+log "sweep: entry sizes (incl. ${ENTRY_META}B header) =$(for s in $SWEEP_SIZES; do printf ' %s' "$(size_label "$s")"; done)"
 # 반복을 바깥 루프로 둔다 -- 시간에 따른 드리프트가 한 크기에 몰리지 않게
 for rep in $(seq 1 "$REPS"); do
     for size in $SWEEP_SIZES; do

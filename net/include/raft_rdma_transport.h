@@ -51,7 +51,7 @@ namespace nvmeof_raft {
  * (send + recv 각각). AppendEntries 의 entry_metas 가 가장 큰데, 엔트리당
  * 약 16B 이므로 1 MiB 면 6만 엔트리가 한 배치에 들어간다. 넘으면 명시적
  * 예외를 던진다 -- 조용히 잘리는 것보다 낫다. */
-constexpr size_t kRdmaMaxMessageBytes = 1u << 20;   /* 1 MiB */
+constexpr size_t kRdmaMaxMessageBytes = 4u << 20;   /* 1 MiB */
 
 /* ============================================================
  * 클라이언트 핸들. rdma_dial 이 만들고, 소멸자가 QP/MR/커넥션을 정리한다.
