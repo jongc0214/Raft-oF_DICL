@@ -8,9 +8,64 @@
 #include <string>
 #include <functional>
 #include <condition_variable>
+#include <memory>
 #include <mutex>
 
 namespace nvmeof_raft {
+
+/* ============================================================
+ * CommandBytes: 명령 바이트를 담는 불변 공유 버퍼
+ *
+ * Entry::command 와 EntryMeta::command 의 타입이다. 복사는 참조 카운트만
+ * 올리고 바이트는 복사하지 않는다. 정상경로(ReplicationMode::Normal)에서
+ * 리더가 AE 를 만들 때 build_entry_metas_locked 가 엔트리 명령을 전역 mu 를
+ * 잡은 채 팔로워마다 통째로 복사했다 -- 크기에 비례하는 시간이 팔로워 수만큼
+ * 직렬화되어 QuorumWait/MutexC 로 나타났다 (4 MiB 에서 QuorumWait 1.8 ms).
+ * 공유하면 그 복사가 사라지고, 커밋 뒤 리더가 command 를 비워도(clear)
+ * 아직 전송 중인 AE 의 사본은 살아 있다.
+ *
+ * 바이트는 만든 뒤 바꿀 수 없다 -- 바꾸려면 새 vector 로 다시 대입한다.
+ * 읽기 API 는 std::vector<uint8_t> 와 같은 이름을 쓴다.
+ * ============================================================ */
+class CommandBytes {
+public:
+    CommandBytes() = default;
+    CommandBytes(std::vector<uint8_t> &&v) { set(std::move(v)); }        /* NOLINT: 암시적 변환 의도 */
+    CommandBytes(const std::vector<uint8_t> &v) { set(std::vector<uint8_t>(v)); }   /* NOLINT */
+
+    bool empty() const { return !p_ || p_->empty(); }
+    size_t size() const { return p_ ? p_->size() : 0; }
+    const uint8_t *data() const { return p_ ? p_->data() : nullptr; }
+    std::vector<uint8_t>::const_iterator begin() const { return vec().begin(); }
+    std::vector<uint8_t>::const_iterator end() const { return vec().end(); }
+    void clear() { p_.reset(); }
+
+    template <class It>
+    void assign(It first, It last) { set(std::vector<uint8_t>(first, last)); }
+    void assign(size_t n, uint8_t v) { set(std::vector<uint8_t>(n, v)); }
+
+    /* StateMachine::apply 등 const vector& 를 받는 곳에 그대로 넘긴다 */
+    const std::vector<uint8_t> &vec() const { return p_ ? *p_ : empty_vec(); }
+    operator const std::vector<uint8_t> &() const { return vec(); }   /* NOLINT */
+
+    friend bool operator==(const CommandBytes &a, const CommandBytes &b) { return a.vec() == b.vec(); }
+    friend bool operator==(const CommandBytes &a, const std::vector<uint8_t> &b) { return a.vec() == b; }
+    friend bool operator==(const std::vector<uint8_t> &a, const CommandBytes &b) { return a == b.vec(); }
+
+private:
+    void set(std::vector<uint8_t> &&v) {
+        if (v.empty()) {
+            p_.reset();
+        } else {
+            p_ = std::make_shared<const std::vector<uint8_t>>(std::move(v));
+        }
+    }
+    static const std::vector<uint8_t> &empty_vec() {
+        static const std::vector<uint8_t> e;
+        return e;
+    }
+    std::shared_ptr<const std::vector<uint8_t>> p_;
+};
 
 /* ============================================================
  * ApplyResult (raft.go 원본)
@@ -46,7 +101,7 @@ struct EntryCommitSignal {
 };
 
 struct Entry {
-    std::vector<uint8_t> command;   /* nil 대응: command.empty() && ring_slot != 0 이면 미로드 상태 */
+    CommandBytes command;   /* nil 대응: command.empty() && ring_slot != 0 이면 미로드 상태 */
     uint64_t term = 0;
 
     /* Go: result chan ApplyResult -- 리더가 apply 결과를 클라이언트에게
@@ -81,8 +136,9 @@ struct EntryMeta {
     uint64_t term = 0;
     uint64_t cmd_len = 0;
     /* 정상경로(ReplicationMode::Normal)에서만 채운다: 명령 바이트 자체.
-     * 블록 복사 모드에서는 비어 있다 -- 바이트는 PBA copy / push로 간다. */
-    std::vector<uint8_t> command;
+     * 블록 복사 모드에서는 비어 있다 -- 바이트는 PBA copy / push로 간다.
+     * 리더의 Entry::command 와 버퍼를 공유한다 (복사 없음, CommandBytes). */
+    CommandBytes command;
 };
 
 /* ============================================================

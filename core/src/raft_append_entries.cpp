@@ -659,7 +659,7 @@ std::vector<EntryMeta> Server::build_entry_metas_locked(uint64_t next, uint64_t 
             continue;
         }
         if (!e.command.empty()) {
-            m.command = e.command;
+            m.command = e.command;   /* 버퍼 공유 (참조 카운트만, 바이트 복사 없음 -- CommandBytes) */
         } else if (e.ring_slot != 0) {
             m.command = read_entry_direct(e.ring_slot).entry.command;
         } else if (e.cmd_len > 0) {

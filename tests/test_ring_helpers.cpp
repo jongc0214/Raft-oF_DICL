@@ -363,8 +363,9 @@ struct PersistFixture {
             Entry e;
             e.term = 3;
             size_t sz = (i % 7 == 0) ? 0 : (100 + (i * 977 + seed) % 6000);   /* 0은 no-op 엔트리 */
-            e.command.resize(sz);
-            for (size_t k = 0; k < sz; k++) e.command[k] = static_cast<uint8_t>(k * 31 + i + seed);
+            std::vector<uint8_t> cmd(sz);
+            for (size_t k = 0; k < sz; k++) cmd[k] = static_cast<uint8_t>(k * 31 + i + seed);
+            e.command = std::move(cmd);
             s->raft.log.push_back(std::move(e));
             s->ring.tail_log_index++;
         }

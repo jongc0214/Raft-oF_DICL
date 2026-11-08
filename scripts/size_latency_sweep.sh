@@ -31,7 +31,7 @@
 #             (다르면 commit-index preflight 에서 붙지 못하고 끝난다)
 #
 # 환경변수:
-#   ADDRS        -addrs 주소 목록 (기본 10.0.0.4:6001,10.0.0.5:6001,10.0.0.6:6001)
+#   ADDRS        -addrs 주소 목록 (기본: env.sh 의 NODES/TOPO 에서 생성)
 #                **IPoIB 주소여야 한다** -- rdma_cm 이 IP 로 장치를 찾는다
 #   SIZES        **엔트리** 바이트 목록, 32B 엔트리 헤더(ENTRY_META_SIZE) 포함
 #                (기본 64 256 1K 4K 16K 64K 256K 1M). 클라이언트에는 헤더를 뺀
@@ -106,15 +106,16 @@ OUTDIR="${2:-$HOME/raftof_clean/csv/lat_size_${TRANSPORT}_$(date +%m%d-%H%M%S)}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="${BIN:-$REPO/build}"
 
-ADDRS="${ADDRS:-10.0.0.4:6000,10.0.0.5:6000,10.0.0.6:6000}"
+# 기본값: env.sh 의 NODES/TOPO 로 만든 IPoIB 주소 (노드를 띄운 것과 같은 TOPO 를 줄 것)
+ADDRS="${ADDRS:-$(source "$REPO/env.sh" >/dev/null 2>&1 && build_cluster ipoib >/dev/null 2>&1 && echo "$ADDRS")}"
 SIZES="${SIZES:-64 256 1024 4096 16384 65536 262144 1048576}"
 # 엔트리 헤더 크기 (core/include/raft_constants.h ENTRY_META_SIZE). SIZES 는
 # 이 헤더를 포함한 엔트리 크기이고, 클라이언트 -size 에는 이만큼 뺀 값을 넘긴다
 ENTRY_META=32
-N="${N:-1000000}"
+N="${N:-100000}"
 REPS="${REPS:-3}"
 TIMEOUT_S="${TIMEOUT_S:-15}"
-RDMA_MAX="${RDMA_MAX:-$((4 * 1024 * 1024))}"
+RDMA_MAX="${RDMA_MAX:-$((4 * 1024 * 1024 + 168))}"
 RING_BYTES="${RING_BYTES:-$((16 * 1024 * 1024))}"
 WARMUP="${WARMUP:-1}"
 WARMUP_SIZE="${WARMUP_SIZE:-4096}"

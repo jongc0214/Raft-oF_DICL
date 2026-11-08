@@ -17,7 +17,7 @@
 #   ./scripts/apply_latency_sweep.sh [출력디렉터리]
 #
 # 환경변수:
-#   ADDRS        -addrs 에 줄 주소 목록 (기본 10.0.0.4:6001,10.0.0.5:6001,10.0.0.6:6001)
+#   ADDRS        -addrs 에 줄 주소 목록 (기본: env.sh 의 NODES/TOPO 에서 생성)
 #                **IPoIB 주소여야 한다** -- rdma_cm 이 IP 로 장치를 찾는다
 #   SIZES        페이로드 바이트 목록 (기본 1Ki..128Ki 를 2배씩)
 #   N            지점당 명령 수 (기본 10000)
@@ -106,7 +106,8 @@ OUTDIR="${1:-$HOME/raftof_clean/csv/apply_latency_$(date +%Y%m%d-%H%M%S)}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="${BIN:-$REPO/build}"
 
-ADDRS="${ADDRS:-10.0.0.4:6001,10.0.0.5:6001,10.0.0.6:6001}"
+# 기본값: env.sh 의 NODES/TOPO 로 만든 IPoIB 주소 (노드를 띄운 것과 같은 TOPO 를 줄 것)
+ADDRS="${ADDRS:-$(source "$REPO/env.sh" >/dev/null 2>&1 && build_cluster ipoib >/dev/null 2>&1 && echo "$ADDRS")}"
 SIZES="${SIZES:-1024 2048 4096 8192 16384 32768 65536 131072}"
 N="${N:-10000}"
 BATCH="${BATCH:-1}"
@@ -186,7 +187,7 @@ printf '  client    : %s\n' "$CLIENT"
 # 바이트)와 프레임 헤더가 붙는다. 여유를 조금 두고 자른다. TCP 는 4바이트 길이
 # 필드라 사실상 상한이 없으므로 검사하지 않는다.
 # ---------------------------------------------------------------------------
-RDMA_MAX="${RDMA_MAX:-$((4 * 1024 * 1024))}"
+RDMA_MAX="${RDMA_MAX:-$((4 * 1024 * 1024 + 168 ))}"
 SWEEP_SIZES=""
 for size in $SIZES; do
     if [ "$size" -le "$HDR" ]; then

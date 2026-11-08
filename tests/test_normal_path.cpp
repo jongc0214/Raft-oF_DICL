@@ -146,6 +146,14 @@ TEST_CASE("build_entry_metas_locked: 블록 복사 모드는 명령을 싣지 �
     }
     CHECK(inl[3].command.empty());   /* no-op */
     CHECK(inl[3].cmd_len == 0);
+
+    /* 정상경로 메타는 리더 엔트리의 버퍼를 공유한다 -- 바이트를 복사하지 않는다 */
+    for (size_t i = 0; i < 3; i++) {
+        CHECK(inl[i].command.data() == L.s->raft.log[i + 1].command.data());
+    }
+    /* 커밋 뒤 리더가 명령을 비워도(raft_commit.cpp) 전송 중인 메타의 바이트는 남는다 */
+    L.s->raft.log[1].command.clear();
+    CHECK(inl[0].command == make_cmd(kSizes[1], 0));
 }
 
 TEST_CASE("정상경로: 팔로워가 직접 쓴 링 바이트가 리더 persist와 같다") {
