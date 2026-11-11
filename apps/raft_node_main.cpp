@@ -32,6 +32,7 @@
 #include "raft_rpc_clients.h"
 #include "raft_rdma_transport.h"   /* rdma_devices_available */
 #include "raft_cli.h"
+#include "raft_cpu_affinity.h"   /* -io-cpus / -push-cpus */
 
 #include <atomic>
 #include <map>
@@ -121,6 +122,12 @@ void usage(const char *prog) {
       "                     (attached over NVMe-oF, never mounted here). Names\n"
       "                     differ per host, so check with `nvme list-subsys`\n"
       "                     and compare the wwid printed at startup.\n"
+      "  -io-cpus LIST      pin the raft RPC threads (leader Apply persist, normal\n"
+      "                     follower ring writes) to these CPUs, e.g. 9,22,25-29.\n"
+      "                     NVMe-oF writes leave on the queue of the submitting CPU;\n"
+      "                     scripts/probe_io_queues.sh finds the fast ones.\n"
+      "  -push-cpus MAP     push mode only. ID=LIST[/ID=LIST...]: pin the push\n"
+      "                     worker for member ID's volume to LIST.\n"
       "  -statemachine KIND noop (default) | hash | kvs. noop costs nothing, so the\n"
       "                     numbers assume a zero-cost application. Use hash\n"
       "                     when you need -op hash to verify that every node\n"
@@ -152,6 +159,8 @@ int main(int argc, char **argv) {
     std::string mode = "destination";
     std::string transport = "rdma";
     std::string push_devices_str;
+    std::string io_cpus_str;
+    std::string push_cpus_str;
     uint64_t ring_pages = DEFAULT_NUM_PAGES;
     bool precondition_ring = false;
     bool profile = false;
@@ -178,6 +187,10 @@ int main(int argc, char **argv) {
             transport = next_arg_value(argc, argv, i, "-transport");
         } else if (arg == "-mode") {
             mode = next_arg_value(argc, argv, i, "-mode");
+        } else if (arg == "-io-cpus") {
+            io_cpus_str = next_arg_value(argc, argv, i, "-io-cpus");
+        } else if (arg == "-push-cpus") {
+            push_cpus_str = next_arg_value(argc, argv, i, "-push-cpus");
         } else if (arg == "-push-devices") {
             push_devices_str = next_arg_value(argc, argv, i, "-push-devices");
         } else if (arg == "-ring-pages") {
@@ -347,6 +360,42 @@ int main(int argc, char **argv) {
         }
     }
 
+    /* -io-cpus / -push-cpus (core/include/raft_cpu_affinity.h) */
+    std::vector<int> io_cpus;
+    if (!io_cpus_str.empty() && !parse_cpu_list(io_cpus_str, &io_cpus)) {
+        std::fprintf(stderr, "invalid -io-cpus '%s' (expected e.g. 9,22,25-29)\n", io_cpus_str.c_str());
+        return 1;
+    }
+    std::map<uint64_t, std::vector<int>> push_cpus;
+    if (!push_cpus_str.empty()) {
+        if (mode != "push") {
+            std::fprintf(stderr, "-push-cpus requires -mode push\n");
+            return 1;
+        }
+        for (const auto &item : split(push_cpus_str, '/', /*skip_empty=*/true)) {
+            size_t eq = item.find('=');
+            uint64_t pid = (eq == std::string::npos)
+                ? 0 : std::strtoull(item.substr(0, eq).c_str(), nullptr, 10);
+            std::vector<int> cpus;
+            if (pid == 0 || !parse_cpu_list(item.substr(eq + 1), &cpus)) {
+                std::fprintf(stderr, "invalid -push-cpus entry '%s' (expected ID=CPULIST)\n",
+                             item.c_str());
+                return 1;
+            }
+            if (push_devices.find(pid) == push_devices.end()) {
+                std::fprintf(stderr, "-push-cpus: member id %llu has no -push-devices entry\n",
+                             static_cast<unsigned long long>(pid));
+                return 1;
+            }
+            if (!push_cpus.emplace(pid, cpus).second) {
+                std::fprintf(stderr, "-push-cpus: member id %llu is mapped twice\n",
+                             static_cast<unsigned long long>(pid));
+                return 1;
+            }
+        }
+    }
+    server->io.io_cpus = io_cpus;
+
     TransportKind transport_kind = TransportKind::Rdma;
     if (!parse_transport_kind(transport, &transport_kind)) {
         std::fprintf(stderr, "-transport must be 'rdma' or 'tcp'\n");
@@ -368,6 +417,10 @@ int main(int argc, char **argv) {
         auto pd = push_devices.find(members[i].id);
         if (pd != push_devices.end()) {
             server->raft.cluster[i].push_device_path = pd->second;
+        }
+        auto pc = push_cpus.find(members[i].id);
+        if (pc != push_cpus.end()) {
+            server->raft.cluster[i].push_cpus = pc->second;
         }
     }
 
@@ -429,9 +482,10 @@ int main(int argc, char **argv) {
                 continue;
             }
             any = true;
-            std::printf("  push device  : %llu -> %s (wwid %s)\n",
+            std::printf("  push device  : %llu -> %s (wwid %s, cpus %s)\n",
                         static_cast<unsigned long long>(m.id), m.push_device_path.c_str(),
-                        m.push_device_wwid.empty() ? "?" : m.push_device_wwid.c_str());
+                        m.push_device_wwid.empty() ? "?" : m.push_device_wwid.c_str(),
+                        m.push_cpus.empty() ? "unpinned" : format_cpu_list(m.push_cpus).c_str());
         }
         if (!any) {
             std::printf("  push device  : (none -- as leader this node pushes to no one)\n");
@@ -442,6 +496,8 @@ int main(int argc, char **argv) {
                     static_cast<unsigned long long>(server->io.ring_map_hash),
                     server->io.ring_extents.size());
     }
+    std::printf("  io cpus      : %s\n",
+                io_cpus.empty() ? "unpinned" : format_cpu_list(io_cpus).c_str());
     std::printf("  transport    : %s\n", transport_kind_name(transport_kind));
     std::printf("  heartbeat    : %d ms\n", heartbeat_ms);
     std::printf("  loop_sleep   : %d ms\n", loop_sleep_us);

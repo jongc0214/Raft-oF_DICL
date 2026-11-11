@@ -103,8 +103,78 @@ if [[ "${NUMA_BIND:-1}" == "1" ]]; then
         command -v numactl >/dev/null || { echo "ERROR: numactl 이 없다 (NUMA_BIND=0 으로 끌 수 있다)"; exit 1; }
         NUMA_PREFIX=(numactl "--cpunodebind=$IB_NUMA" "--membind=$IB_NUMA")
         NUMA_DESC="node $IB_NUMA ($IB_IF)"
+        # [실험] CPUS="9,22,25,28,29" 면 프로세스 전체를 그 CPU 에만 둔다 (메모리는 IB 노드 그대로).
+        # NVMe-oF 쓰기는 보내는 CPU 의 큐로 나가는데, 스토리지 쪽에서 그 큐의 완료 IRQ 가 반대 소켓
+        # CPU 에 걸려 있으면 1MiB 쓰기가 ~75us 느리다 (11-08). 빠른 큐의 CPU 만 남겨 비교하는 용도.
+        if [[ -n "${CPUS:-}" ]]; then
+            NUMA_PREFIX=(numactl "--physcpubind=$CPUS" "--membind=$IB_NUMA")
+            NUMA_DESC="cpus $CPUS, mem node $IB_NUMA ($IB_IF)"
+        fi
     else
         NUMA_DESC="off ($IB_IF 의 NUMA 노드를 알 수 없음)"
+    fi
+fi
+
+# I/O 큐 고정 (core/include/raft_cpu_affinity.h, scripts/probe_io_queues.sh)
+#   NVMe-oF 쓰기는 보내는 CPU 의 큐로 나가고, 스토리지 쪽에서 그 큐의 완료 IRQ 가 IB 카드와
+#   다른 소켓에 걸려 있으면 1MiB 쓰기가 ~75us 느리다 (11-08). 그래서 persist 하는 스레드를
+#   probe_io_queues.sh 가 찾은 빠른 큐의 CPU 에 고정한다.
+#   IO_PIN=auto (기본)  기록이 있으면 쓰고, 없으면 고정 없이 경고만. 기록이 재연결 전 것이면 중단
+#   IO_PIN=1            기록이 없어도 중단
+#   IO_PIN=0            고정하지 않는다
+#   IO_CPUS="..." / PUSH_CPUS="5=..../6=...."  기록 대신 직접 지정 (대조하지 않는다)
+IO_PIN="${IO_PIN:-auto}"
+IOQ_FILE="$RAFT_ROOT/results/io_queues/$(hostname -s).env"
+IO_ARGS=()
+IO_DESC="off (IO_PIN=0)"
+PUSH_CPU_DESC=""
+ioq_fail() {   # <msg>: IO_PIN=1 이면 중단, auto 면 경고
+    if [[ "$IO_PIN" == "1" ]]; then echo "ERROR: $1"; exit 1; fi
+    echo "WARN: $1 -- 고정 없이 띄운다"
+}
+# ioq_cpus <id> -> 기록된 CPU 목록. 기록이 없으면 1, 재연결돼 기록이 낡았으면 2 ($(...) 안이라 exit 대신)
+ioq_cpus() {
+    local id="$1" vc="IOQ_${1}_CTRL" vi="IOQ_${1}_CNTLID" vp="IOQ_${1}_CPUS" cur
+    [[ -n "${!vc:-}" ]] || return 1
+    cur="$(ctrl_for_nqn "$(_pool_field "$id" 3)")" || return 1
+    if [[ "$cur" != "${!vc} ${!vi}" ]]; then
+        echo "ERROR: node $id 볼륨이 기록($IOQ_FILE: ${!vc} cntlid ${!vi}) 뒤에 다시 연결됐다(지금 $cur)." >&2
+        echo "       큐 배치가 바뀌었을 수 있다: ./scripts/probe_io_queues.sh 를 다시 돌리거나 IO_PIN=0" >&2
+        return 2
+    fi
+    echo "${!vp}"
+}
+if [[ "$IO_PIN" != "0" ]]; then
+    [[ -f "$IOQ_FILE" ]] && source "$IOQ_FILE"
+    if [[ -n "${IO_CPUS:-}" ]]; then
+        IO_ARGS+=(-io-cpus "$IO_CPUS"); IO_DESC="$IO_CPUS (IO_CPUS 직접 지정)"
+    elif [[ ! -f "$IOQ_FILE" ]]; then
+        ioq_fail "큐 기록($IOQ_FILE)이 없다. ./scripts/probe_io_queues.sh 로 만든다"; IO_DESC="off (기록 없음)"
+    elif rc=0; own_cpus="$(ioq_cpus "$ID")" || rc=$?; [[ $rc -eq 2 ]] && exit 1; [[ $rc -ne 0 ]]; then
+        ioq_fail "$IOQ_FILE 에 node $ID 기록이 없다"; IO_DESC="off (기록 없음)"
+    elif [[ -z "$own_cpus" ]]; then
+        IO_DESC="off (빠른 큐 없음, $IOQ_FILE)"
+    else
+        IO_ARGS+=(-io-cpus "$own_cpus"); IO_DESC="$own_cpus ($IOQ_FILE)"
+    fi
+    if [[ "$MODE" == "push" ]]; then
+        if [[ -n "${PUSH_CPUS:-}" ]]; then
+            IO_ARGS+=(-push-cpus "$PUSH_CPUS"); PUSH_CPU_DESC="$PUSH_CPUS (직접 지정)"
+        else
+            pmap=""
+            for item in ${PUSH_DEVICES//,/ }; do
+                peer="${item%%=*}"
+                rc=0; pc="$(ioq_cpus "$peer")" || rc=$?
+                [[ $rc -eq 2 ]] && exit 1
+                if [[ $rc -ne 0 ]]; then
+                    ioq_fail "push 대상 node $peer 의 큐 기록이 없다 (ALL=1 ./scripts/probe_io_queues.sh)"
+                    continue
+                fi
+                [[ -n "$pc" ]] && pmap+="${pmap:+/}${peer}=${pc}"
+            done
+            [[ -n "$pmap" ]] && IO_ARGS+=(-push-cpus "$pmap")
+            PUSH_CPU_DESC="${pmap:-(none)}"
+        fi
     fi
 fi
 
@@ -125,6 +195,8 @@ echo "precondition: $RING_PRECONDITION"
 echo "heartbeat   : $HEARTBEAT_MS ms"
 echo "ae-batch    : $AE_BATCH"
 echo "numa bind   : $NUMA_DESC"
+echo "io cpus     : $IO_DESC"
+[[ -n "$PUSH_CPU_DESC" ]] && echo "push cpus   : $PUSH_CPU_DESC"
 echo "log         : $LOG"
 echo "========================================"
 
@@ -170,6 +242,7 @@ sudo "${LIB_PREFIX[@]}" "${NUMA_PREFIX[@]}" stdbuf -oL -eL ./build/raft_node \
     -ring-pages "$RING_PAGES" \
     "${PRECONDITION_ARGS[@]}" \
     "${PUSH_ARGS[@]}" \
+    "${IO_ARGS[@]}" \
     -heartbeat-ms "$HEARTBEAT_MS" \
     -loop-sleep-us 200 \
     -ae-batch 256 \

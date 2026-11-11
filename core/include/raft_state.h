@@ -142,6 +142,7 @@ struct ClusterMember {
      *   교체) 늦게 끝난 job이 옛 엔트리나 옛 링에 대한 결과를 새 구간에 적지
      *   못하게 한다. */
     std::string push_device_path;
+    std::vector<int> push_cpus;   /* 이 멤버의 push IoWorker 를 고정할 CPU (-push-cpus, 비면 고정 안 함) */
     uint64_t push_map_hash = 0;
     bool push_nodev_warned = false;
     std::string push_device_wwid;
@@ -394,6 +395,10 @@ struct StorageIo {
     std::vector<std::shared_ptr<CachedFD>> push_fds;
     std::vector<Extent> ring_extents;
     std::string own_wwid;
+
+    /* 스토리지 I/O 를 하는 raft RPC 연결 스레드를 고정할 CPU (-io-cpus).
+     * 비면 고정하지 않는다. raft_cpu_affinity.h 참고. init 이후 바뀌지 않는다. */
+    std::vector<int> io_cpus;
 };
 
 /* ============================================================

@@ -160,6 +160,10 @@ fi
 mkdir -p "$OUTDIR" || exit 1
 
 log "output -> $OUTDIR"
+# 노드별 persist 스레드 CPU 고정 상태 (start_node.sh IO_PIN) -- LPersist/StorageIO 해석에 필요
+if (source "$REPO/env.sh" >/dev/null 2>&1 && record_io_pin "$OUTDIR/io_pin.txt"); then
+    while IFS= read -r l; do log "io pin: $l"; done < "$OUTDIR/io_pin.txt"
+fi
 printf '  addrs     : %s\n  transport : %s\n' \
     "$ADDRS" "$TRANSPORT"
 printf '  n         : %s   batch: 1   reps: %s\n' "$N" "$REPS"

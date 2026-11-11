@@ -17,6 +17,7 @@
 #include "raft_constants.h"
 #include "raft_basics.h"
 #include "cached_fd.h"   /* CachedFD 역참조 */
+#include "raft_cpu_affinity.h"   /* -push-cpus */
 
 #include <chrono>
 #include <cstring>
@@ -262,6 +263,20 @@ void Server::start() {
         if (io.push_fds[i]) {
             auto pw = std::make_unique<IoWorker>();
             pw->start(kPushIoSpinUs, kPushIoMaxQueue);
+            /* -push-cpus: 이 멤버 볼륨에 쓰는 워커를 그 장치의 빠른 큐 CPU 에 고정한다.
+             * 워커 자기 스레드에서 돌아야 하므로 첫 job 으로 넣는다 (raft_cpu_affinity.h). */
+            const std::vector<int> cpus = raft.cluster[i].push_cpus;
+            if (!cpus.empty()) {
+                pw->submit([cpus, id = raft.cluster[i].id]() {
+                    int rc = pin_current_thread(cpus);
+                    if (rc != 0) {
+                        std::fprintf(stderr, "[WARN] -push-cpus %llu=%s: pthread_setaffinity_np "
+                                     "failed (%s) -- push worker stays unpinned\n",
+                                     static_cast<unsigned long long>(id),
+                                     format_cpu_list(cpus).c_str(), std::strerror(rc));
+                    }
+                });
+            }
             workers.push_io[i] = std::move(pw);
         }
     }

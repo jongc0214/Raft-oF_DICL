@@ -5,7 +5,10 @@
 #include "raft_wire_codec.h"
 #include "raft_proto_conv.h"
 #include "raft_rpc_methods.h"
+#include "raft_cpu_affinity.h"
 
+#include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
 #include <utility>
@@ -171,9 +174,28 @@ bool dispatch_client_method(const std::string &method,
     return false;
 }
 
+/* -io-cpus: RPC 연결 스레드(RDMA serve_rdma_connection / TCP serve_connection)는
+ * 연결마다 하나이고, 리더 Apply 의 persist 와 normal 팔로워의 링 쓰기를 직접 한다.
+ * 스레드마다 첫 RPC 에서 한 번 고정한다 -- 고정은 그 자리에서 이 스레드를 옮기므로
+ * 그 RPC 의 I/O 부터 고정된 CPU 의 NVMe-oF 큐로 나간다 (raft_cpu_affinity.h). */
+static void pin_rpc_thread_once(const Server *server) {
+    thread_local bool done = false;
+    if (done) { return; }
+    done = true;
+    const std::vector<int> &cpus = server->io.io_cpus;
+    if (cpus.empty()) { return; }
+    int rc = pin_current_thread(cpus);
+    if (rc != 0) {
+        std::fprintf(stderr, "[WARN] -io-cpus %s: pthread_setaffinity_np failed (%s) -- "
+                     "this RPC thread stays unpinned\n",
+                     format_cpu_list(cpus).c_str(), std::strerror(rc));
+    }
+}
+
 bool dispatch_raft_method(Server *server, const std::string &method,
                                   const std::vector<uint8_t> &body,
                                   std::vector<uint8_t> &rsp_body) {
+    pin_rpc_thread_once(server);
     if (method == rpc_method::kAppendEntries) {
         rpcproto::AppendEntriesRequest proto_req;
         proto_req.ParseFromArray(body.data(), static_cast<int>(body.size()));

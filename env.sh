@@ -129,6 +129,23 @@ dev_for_nqn() {
     echo "/dev/${heads[0]##*/}"
 }
 
+# ctrl_for_nqn <nqn>  ->  "<컨트롤러 이름> <cntlid>" (예: "nvme1 4")
+#   cntlid 는 연결(association)마다 새로 받으므로, 재연결 여부를 이것으로 안다
+#   (scripts/probe_io_queues.sh 기록과 start_node.sh 의 대조에 쓴다).
+ctrl_for_nqn() {
+    local nqn="$1" s c
+    for s in /sys/class/nvme-subsystem/nvme-subsys*; do
+        [[ -r "$s/subsysnqn" && "$(<"$s/subsysnqn")" == "$nqn" ]] || continue
+        for c in "$s"/nvme[0-9]*; do
+            [[ "${c##*/}" =~ ^nvme[0-9]+$ ]] || continue
+            echo "${c##*/} $(<"/sys/class/nvme/${c##*/}/cntlid")"
+            return 0
+        done
+    done
+    echo "ctrl_for_nqn: '$nqn' 컨트롤러가 이 호스트에 없다" >&2
+    return 1
+}
+
 # build_cluster <ipoib|eth>  ->  CLUSTER ADDRS (NODES 순서)
 #   device 필드: 이 호스트에서 해석되면 실제 장치, 아니면 "nqn:<nqn>".
 #   raft_node 는 자기 항목의 device_path 만 쓰므로(apps/raft_node_main.cpp:270)
@@ -157,6 +174,22 @@ build_cluster() {
         ADDRS+="${ADDRS:+,}${addr}"
     done
     export CLUSTER ADDRS
+}
+
+# record_io_pin <outfile>  ->  NODES 의 각 노드가 어떤 CPU 로 persist 스레드를 고정했는지 기록
+#   (start_node.sh IO_PIN / raft_node -io-cpus). 각 노드의 가장 최근 시작 로그($RAFT_ROOT 는 NFS
+#   라 모든 노드 로그가 보인다)에서 뽑는다. 스윕 결과의 LPersist/StorageIO 는 고정 여부에 따라
+#   1MiB 기준 ~75us 달라지므로 결과와 같이 남긴다.
+record_io_pin() {
+    local out="$1" id lg line push
+    : > "$out"
+    for id in $NODES; do
+        lg="$(ls -t "$RAFT_ROOT"/raft_node_"${id}"_*.log 2>/dev/null | head -1)"
+        if [[ -z "$lg" ]]; then echo "node $id: (시작 로그 없음)" >> "$out"; continue; fi
+        line="$(grep -m1 '^  io cpus' "$lg" | sed 's/^  io cpus *: //')"
+        push="$(grep '^  push device' "$lg" | grep -oE '^  push device *: [0-9]+|cpus [^)]*' | sed 's/^  push device *: /push /' | paste -sd' ' -)"
+        echo "node $id: io cpus ${line:-(줄 없음: -io-cpus 이전 바이너리)}${push:+ | $push} [${lg##*/}]" >> "$out"
+    done
 }
 
 # build_bc_devices -> BC_DEVICES (NODES 순서, 스토리지 서버의 raft_blockcopy_server -devices 용)
