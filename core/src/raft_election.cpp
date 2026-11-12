@@ -1,6 +1,7 @@
 #include "raft_server.h"
 #include "raft_constants.h"
 #include "raft_basics.h"
+#include "raft_event_log.h"
 
 #include <chrono>
 #include <cstdlib>
@@ -55,8 +56,18 @@ void Server::timeout() {
     std::unique_lock<std::mutex> lk(mu);
 
     if (clock_type::now() > raft.election_timeout) {
+        const ServerState prev_state = raft.state;
+        const uint64_t prev_leader = raft.leader_id;
         raft.state = ServerState::Candidate;
         raft.current_term++;
+        raft.leader_id = 0;
+        raft.candidate_since = clock_type::now();
+        election_log(raft.id, "election timeout (%s, leader=%llu) -> candidate term=%llu "
+                     "last_idx=%llu",
+                     to_string(prev_state).c_str(),
+                     static_cast<unsigned long long>(prev_leader),
+                     static_cast<unsigned long long>(raft.current_term),
+                     static_cast<unsigned long long>(ring.tail_log_index - 1));
         for (size_t i = 0; i < raft.cluster.size(); i++) {
             if (static_cast<int>(i) == raft.cluster_index) {
                 raft.cluster[i].voted_for = raft.id;
@@ -105,9 +116,14 @@ void Server::request_vote_worker(int peer_index) {
     req.last_log_term = last_log_term;
     mu.unlock();
 
+    const uint64_t peer_id = raft.cluster[i].id;   /* id 는 기동 후 바뀌지 않는다 */
+
     RequestVoteResponse rsp;
     /* transport가 없으면 전송 실패와 동일하게 다룬다 */
     if (transport == nullptr || !transport->request_vote(peer_index, req, rsp)) {
+        election_log(raft.id, "vote rpc to n%llu failed (term=%llu)",
+                     static_cast<unsigned long long>(peer_id),
+                     static_cast<unsigned long long>(req.rpc.term));
         return;
     }
 
@@ -118,6 +134,10 @@ void Server::request_vote_worker(int peer_index) {
     if (rsp.rpc.term != req.rpc.term) {
         return;
     }
+    election_log(raft.id, "vote from n%llu: %s (term=%llu)",
+                 static_cast<unsigned long long>(peer_id),
+                 rsp.vote_granted ? "granted" : "denied",
+                 static_cast<unsigned long long>(req.rpc.term));
     if (rsp.vote_granted) {
         raft.cluster[i].voted_for = raft.id;
     }
@@ -135,6 +155,10 @@ void Server::handle_request_vote_request(const RequestVoteRequest &req,
     rsp.rpc.term = raft.current_term;
 
     if (req.rpc.term < raft.current_term) {
+        election_log(raft.id, "deny vote to n%llu: stale term %llu < %llu",
+                     static_cast<unsigned long long>(req.candidate_id),
+                     static_cast<unsigned long long>(req.rpc.term),
+                     static_cast<unsigned long long>(raft.current_term));
         return;
     }
 
@@ -154,6 +178,23 @@ void Server::handle_request_vote_request(const RequestVoteRequest &req,
         rsp.vote_granted = true;
         reset_election_timeout();
         persist_circular(false, 0);
+        election_log(raft.id, "grant vote to n%llu term=%llu",
+                     static_cast<unsigned long long>(req.candidate_id),
+                     static_cast<unsigned long long>(raft.current_term));
+    } else if (!log_ok) {
+        election_log(raft.id, "deny vote to n%llu term=%llu: log behind "
+                     "(cand %llu/%llu < mine %llu/%llu, last term/idx)",
+                     static_cast<unsigned long long>(req.candidate_id),
+                     static_cast<unsigned long long>(raft.current_term),
+                     static_cast<unsigned long long>(req.last_log_term),
+                     static_cast<unsigned long long>(req.last_log_index),
+                     static_cast<unsigned long long>(last_log_term),
+                     static_cast<unsigned long long>(log_len));
+    } else {
+        election_log(raft.id, "deny vote to n%llu term=%llu: already voted for n%llu",
+                     static_cast<unsigned long long>(req.candidate_id),
+                     static_cast<unsigned long long>(raft.current_term),
+                     static_cast<unsigned long long>(get_voted_for()));
     }
 }
 
@@ -172,6 +213,22 @@ void Server::become_leader() {
 
     if (quorum == 0) {
         raft.state = ServerState::Leader;
+        raft.leader_id = raft.id;
+        {
+            int votes = 0;
+            for (const auto &m : raft.cluster) {
+                if (m.voted_for == raft.id) { votes++; }
+            }
+            election_log(raft.id, "became leader term=%llu votes=%d/%zu in %lld ms "
+                         "(tail=%llu commit=%llu)",
+                         static_cast<unsigned long long>(raft.current_term),
+                         votes, raft.cluster.size(),
+                         static_cast<long long>(std::chrono::duration_cast<
+                             std::chrono::milliseconds>(clock_type::now() -
+                                                        raft.candidate_since).count()),
+                         static_cast<unsigned long long>(ring.tail_log_index - 1),
+                         static_cast<unsigned long long>(raft.commit_index));
+        }
 
         /* [Push Integration]
          * 이전 리더십 때 알던 팔로워 상태는
@@ -285,8 +342,13 @@ void Server::heartbeat() {
  * ============================================================ */
 bool Server::update_term(uint64_t msg_term) {
     if (msg_term > raft.current_term) {
+        election_log(raft.id, "term %llu -> %llu: %s -> follower",
+                     static_cast<unsigned long long>(raft.current_term),
+                     static_cast<unsigned long long>(msg_term),
+                     to_string(raft.state).c_str());
         raft.current_term = msg_term;
         raft.state = ServerState::Follower;
+        raft.leader_id = 0;
         set_voted_for(0);
         reset_election_timeout();
         persist_circular(false, 0);

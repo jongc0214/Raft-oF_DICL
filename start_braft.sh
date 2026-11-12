@@ -11,7 +11,14 @@
 #      TOPO 를 바꿨으면 반드시 지워야 한다. KEEP_DATA=1 이면 지우지 않는다
 #   4. run_block_node.sh 로 기동 (RDMA 장치 자동 탐색, NUMA 고정, 라이브러리 사본은 그쪽에서 처리)
 #
-# 환경변수: TOPO(3|4|5|6|7|9, 기본 3) 또는 NODES, KEEP_DATA, NUMA_BIND, RDMA_DEV, BRAFT_TOOLS
+#   LOCAL_RUN=1 (기본): block_server 를 /var/tmp/raftof-<user>/bin 으로 복사해 그 사본으로 띄우고,
+#   server.log 는 로컬 디스크(/var/tmp/raftof-<user>/braft_server_<ID>.log)에 쓴다
+#   (데이터 디렉터리의 server.log 는 그 파일을 가리키는 심볼릭 링크). raftof start_node.sh 와 같은 조건:
+#   BLOCK_BUILD_DIR 는 NFS 라 실행 파일 페이지 읽기가 멈출 수 있고, 로그를 측정 볼륨(/mnt/raftvol)에
+#   두면 세그먼트 fdatasync 의 저널 커밋에 섞인다. run_block_node.sh(root 소유)는 고치지 않고
+#   BLOCK_BUILD_DIR 를 넘겨 사본을 쓰게 한다.
+#
+# 환경변수: TOPO(3|4|5|6|7|9, 기본 3) 또는 NODES, KEEP_DATA, NUMA_BIND, RDMA_DEV, BRAFT_TOOLS, LOCAL_RUN
 # 멈추기: ./stop_braft.sh <node-id>
 #
 set -euo pipefail
@@ -56,6 +63,20 @@ mountpoint -q /mnt/raftvol || { echo "ERROR: /mnt/raftvol 이 마운트돼 있�
 DATA="/mnt/raftvol/node${ID}/braft-block"
 PIDFILE="$DATA/server.pid"
 
+# 로컬 실행 준비: 실행 파일 사본 (env.sh stage_binary). env.sh 의 NODES 등이 braft 쪽으로
+# 새지 않게 서브셸에서 부른다.
+LOCAL_LOG=""
+if [[ "${LOCAL_RUN:-1}" == "1" ]]; then
+    BUILD_DIR="$(export TOPO="${TOPO:-3}"; source "$BRAFT_TOOLS/cluster.env" >/dev/null 2>&1; echo "$BLOCK_BUILD_DIR")"
+    staged="$(source "$(dirname "$0")/env.sh" >/dev/null 2>&1; stage_binary "$BUILD_DIR/block_server" && echo "LOCAL_DIR=$LOCAL_DIR")" ||
+        { echo "ERROR: block_server 로컬 복사 실패 ($BUILD_DIR)"; exit 1; }
+    read -r STAGED_BIN BIN_SHA <<< "$(head -1 <<< "$staged")"
+    LOCAL_DIR="$(sed -n 's/^LOCAL_DIR=//p' <<< "$staged")"
+    BENV+=("BLOCK_BUILD_DIR=$(dirname "$STAGED_BIN")")
+    LOCAL_LOG="$LOCAL_DIR/braft_server_${ID}.log"
+    echo "[start_braft] binary: $STAGED_BIN (sha $BIN_SHA), log: $LOCAL_LOG"
+fi
+
 # 2. 기존 block_server 정리 (pidfile 없이 떠 있는 것도 이 호스트에선 이 실험 것뿐이다)
 "$(dirname "$0")/stop_braft.sh" "$ID"
 
@@ -68,7 +89,12 @@ else
     as_root "${BENV[@]}" ./clean_block_node.sh "$ID"
 fi
 
-# 4. 기동
+# 4. 기동. LOCAL_RUN 이면 데이터 디렉터리의 server.log 를 로컬 로그로 가는 링크로 둔다
+#    (run_block_node.sh 의 >"$DATA/server.log" 가 링크를 따라 로컬 파일에 쓴다. status_block_node.sh 도 그대로 읽힌다)
+if [[ -n "$LOCAL_LOG" ]]; then
+    as_root mkdir -p "$DATA"
+    as_root ln -sfn "$LOCAL_LOG" "$DATA/server.log"
+fi
 as_root "${BENV[@]}" ./run_block_node.sh "$TRANSPORT" "$ID"
 
 echo

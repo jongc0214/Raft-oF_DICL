@@ -42,6 +42,20 @@ POOL=(
 #   다르다 (7: ibp177s0, 8: ibp175s0, 나머지 ibp59s0) -- 이름 대신 10.0.0.x 주소로 찾는다.
 # DOWN 은 해당 전송 모드(ipoib: rdma/tcp-ipoib)를 쓸 수 없다는 표시다.
 
+# NODE4_E1=1 : remote pull 실험 (2026-11-11). node4 볼륨을 eternitystorage PM983 대신
+#   eternity1 의 970 EVO Plus 250GB (nvmet e1node1, rdma 10.0.0.1:4420) 로 쓴다.
+#   팔로워 볼륨과 blockcopy 서버(eternitystorage)는 그대로라, 서버의 node4 읽기만 원격이 된다.
+#   storage_dev 는 eternitystorage 가 e1node1 을 initiator 로 붙였을 때의 by-id (ns device_uuid).
+#   호스트 설정/원복은 ./remote_pull.sh up|down. 모든 호스트(서버 포함)에 같은 값을 줄 것.
+if [[ "${NODE4_E1:-0}" == "1" ]]; then
+    for _i in "${!POOL[@]}"; do
+        if [[ "${POOL[$_i]}" == 4\|* ]]; then
+            POOL[$_i]="4|10.0.0.4:6000|115.145.173.123:6000|e1node1|/dev/disk/by-id/nvme-uuid.3ffbc4a8-8cde-4ba2-b208-ccd5d47a433a"   # eternity1 970 EVO
+        fi
+    done
+    unset _i
+fi
+
 # 실행 시 선택. 우선순위: NODES > TOPO > 기본(3노드)
 #   NODES="1 3 4 5 6" ./start_node.sh ...      직접 지정 (순서 = cluster 순서, 1~6 아무 조합)
 #   TOPO=5 ./start_node.sh ...                 프리셋 (2 3 4 5 6)
@@ -189,6 +203,73 @@ record_io_pin() {
         line="$(grep -m1 '^  io cpus' "$lg" | sed 's/^  io cpus *: //')"
         push="$(grep '^  push device' "$lg" | grep -oE '^  push device *: [0-9]+|cpus [^)]*' | sed 's/^  push device *: /push /' | paste -sd' ' -)"
         echo "node $id: io cpus ${line:-(줄 없음: -io-cpus 이전 바이너리)}${push:+ | $push} [${lg##*/}]" >> "$out"
+    done
+}
+
+# ---------------------------------------------------------------------------
+# 로컬 실행 (LOCAL_RUN=1, start_node.sh / start_blockcopy.sh 기본)
+#   저장소($RAFT_ROOT)는 NFS 라 실행 중 로그 쓰기와 실행 파일 페이지 읽기가 가끔 수백 ms~수 초
+#   멈춘다 (2026-11-12: 리더 mu 를 쥔 스레드가 멈춰 MutexC/QW 평균만 튐, 락 계측으로 확인).
+#   그래서 실행 파일은 로컬로 복사해 돌리고, 로그는 로컬에 쓴다. 저장소 로그 경로에는 기동 배너만
+#   두었다가(record_io_pin 용) stop_*.sh 가 전체 로그로 덮어쓴다.
+# ---------------------------------------------------------------------------
+LOCAL_DIR="${LOCAL_DIR:-/var/tmp/raftof-$(id -un)}"
+
+# local_dir_ok  ->  LOCAL_DIR 을 만들고 로컬 디스크인지 확인 (NFS 등이면 실패)
+local_dir_ok() {
+    mkdir -p "$LOCAL_DIR/bin" || { echo "ERROR: $LOCAL_DIR 를 만들지 못했다" >&2; return 1; }
+    case "$(findmnt -no FSTYPE -T "$LOCAL_DIR" 2>/dev/null)" in
+        nfs*|cifs|smb*|fuse*|"") echo "ERROR: LOCAL_DIR=$LOCAL_DIR 가 로컬 디스크가 아니다" >&2; return 1 ;;
+    esac
+}
+
+# stage_binary <원본 경로>  ->  "<로컬 경로> <sha256 앞 12자리>" 출력
+#   내용이 다를 때만 복사한다. 임시 파일에 쓰고 mv 로 바꿔 넣어 돌고 있는 프로세스의 파일은 건드리지 않는다.
+stage_binary() {
+    local src="$1" dst
+    dst="$LOCAL_DIR/bin/$(basename "$src")"
+    [[ -x "$src" ]] || { echo "ERROR: $src 가 없다" >&2; return 1; }
+    local_dir_ok || return 1
+    if ! cmp -s "$src" "$dst"; then
+        cp "$src" "$dst.tmp.$$" && chmod 755 "$dst.tmp.$$" && mv -f "$dst.tmp.$$" "$dst" ||
+            { rm -f "$dst.tmp.$$"; echo "ERROR: $src -> $dst 복사 실패" >&2; return 1; }
+    fi
+    echo "$dst $(sha256sum "$dst" | cut -c1-12)"
+}
+
+# publish_banner <로컬 로그> <저장소 로그> <바이너리 sha> [끝 줄 정규식]
+#   로컬 로그의 첫 줄부터 끝 줄(포함)까지를 저장소 로그에 쓴다. 끝 줄이 없으면 최대 3초 기다린 뒤
+#   있는 만큼 쓴다. 맨 위에 '# local run' 머리를 붙인다.
+publish_banner() {
+    local llog="$1" rlog="$2" sha="$3" endre="${4:-^  term/tail}" i
+    for i in $(seq 1 30); do
+        grep -qE "$endre" "$llog" 2>/dev/null && break
+        sleep 0.1
+    done
+    {
+        echo "# local run: host=$(hostname -s) log=$llog bin_sha=$sha"
+        echo "# (기동 배너만. 전체 로그는 stop 스크립트가 여기로 가져온다)"
+        awk -v re="$endre" 'NR > 200 {exit} {print} $0 ~ re {exit}' "$llog" 2>/dev/null
+    } > "$rlog.tmp.$$" && mv -f "$rlog.tmp.$$" "$rlog"
+}
+
+# collect_local_logs <접두사>  ->  LOCAL_DIR/running_<접두사>*.env 마다 로컬 로그 전체를 저장소로 복사
+#   env 파일 형식: LLOG=… / RLOG=… / SHA=…
+collect_local_logs() {
+    local prefix="$1" f LLOG RLOG SHA
+    for f in "$LOCAL_DIR"/running_"$prefix"*.env; do
+        [[ -e "$f" ]] || continue
+        LLOG=""; RLOG=""; SHA=""
+        # shellcheck disable=SC1090
+        source "$f"
+        if [[ -n "$LLOG" && -n "$RLOG" && -r "$LLOG" ]]; then
+            { echo "# local run: host=$(hostname -s) log=$LLOG bin_sha=$SHA (전체, stop 때 복사)"; cat "$LLOG"; } \
+                > "$RLOG.tmp.$$" && mv -f "$RLOG.tmp.$$" "$RLOG" &&
+                echo "[log] $LLOG -> $RLOG ($(wc -l < "$LLOG") lines)"
+        else
+            echo "[log] WARN: $f 의 로컬 로그($LLOG)를 읽지 못했다"
+        fi
+        rm -f "$f"
     done
 }
 

@@ -161,6 +161,17 @@ void Server::append_entries_worker(int fi, ReplSink *sink, bool heartbeat_due) {
             mu.unlock();
             return;
         }
+        /* push 대상인데 리더 자신의 persist I/O 중이라 durable_floor 에 막혀 보낼 게 없는 경우.
+         * push_gate 는 빈 배치(next > last)면 false 를 돌려 위 관문을 지나치므로 따로 막는다.
+         * 막지 않으면 push job 완료(finish_push_job)가 깨운 이 회차가 빈 AE 를 보내고, persist 가
+         * 끝난 뒤의 진짜 AE 가 그 RPC 왕복만큼 늦는다 -- 11-12 S 구성 push 256K 에서 엔트리마다
+         * 0.99회, 큰 크기 QuorumWait 증가와 같이 움직였다 (11-12 측정).
+         * 깨우기는 잃지 않는다: persist 가 끝나면 apply 경로가 append_entries(sink) 를 다시 부른다
+         * (raft_apply.cpp). persist 중이 아닐 때의 빈 AE(팔로워에 commit 을 알리는 것)는 그대로 둔다. */
+        if (is_push_target(fi) && persist_inflight && last < next && !heartbeat_due) {
+            mu.unlock();
+            return;
+        }
         // => 불필요한 예외처리 아닌가?
         //    Claude: fast backoff를 되살리거나 로그 truncation을 도입하면 필요
 

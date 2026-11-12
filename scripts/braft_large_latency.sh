@@ -67,7 +67,8 @@
 # **(3) 서버는 -breakdown=true 로 떠 있다** (run_block_node.sh). raftof 의
 # -profile 과 같은 종류의 계측 오버헤드가 양쪽에 다 있다.
 #
-# **(4) 실행 호스트:** block_client 바이너리가 있는 곳 (BLOCK_BUILD_DIR, NFS).
+# **(4) 실행 호스트:** block_client 바이너리가 있는 곳 (BLOCK_BUILD_DIR, NFS). 실행은 로컬 사본
+#   (LOCAL_CLIENT=1, /var/tmp/raftof-<user>/bin) 으로 한다.
 
 set -uo pipefail
 
@@ -139,6 +140,14 @@ run_client() {
 if [ ! -x "$CLIENT" ]; then
     fail "block_client not found or not executable: $CLIENT"
     exit 1
+fi
+
+# block_client 를 로컬 디스크 사본으로 돌린다 (LOCAL_CLIENT=1, 기본). BLOCK_BUILD_DIR 는 NFS 라
+# 실행 파일 페이지 읽기가 가끔 수백 ms 멈출 수 있다 (2026-11-12 raftof 에서 확인한 NFS 멈춤).
+# raftof 클라이언트(apply_latency_sweep.sh)와 같은 조건으로 맞춘다. env.sh stage_binary 를 쓴다.
+if [ "${LOCAL_CLIENT:-1}" = "1" ]; then
+    staged="$(source "$REPO/env.sh" >/dev/null 2>&1; stage_binary "$CLIENT")" || { fail "block_client 로컬 복사 실패"; exit 1; }
+    CLIENT="${staged%% *}"
 fi
 
 mkdir -p "$OUTDIR" || exit 1

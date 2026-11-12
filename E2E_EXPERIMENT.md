@@ -478,3 +478,228 @@ done
 | 링 해시는 같은데 전부 0 | 복제가 일어나지 않았다. §6-2 non-zero 검사 |
 | 첫 측정만 유독 느림 | **U11** — 링 extent 가 unwritten. §7-1 워밍업 |
 | 재부팅 후 `mount : NONE`, subsystem 목록 비어 있음 | fstab 에 항목이 없고 autoconnect 가 복구 못 한다. §3-3 |
+
+
+
+## 10. IO thread를 빠른 CPU core에 고정하는 방법
+절차
+
+1. 빌드 (코드를 바꿨을 때만)
+
+build/raft_node(11-09 09:29 빌드)에는 이미 -io-cpus가 들어 있습니다. 그 뒤에 코드를 고쳤다면 ./build.sh node로 다시 빌드하면 됩니다. /home이 NFS라 한 번만 하면 됩니다.
+
+2. 노드 정지
+
+probe는 raft_node가 돌고 있으면 실행을 거부합니다. 그 트래픽이 스토리지 IRQ 카운트에 섞이기 때문입니다.
+
+```
+eternity4
+cd ~/raftof_clean
+./stop_node.sh
+eternity5
+cd ~/raftof_clean
+./stop_node.sh
+eternity6
+cd ~/raftof_clean
+./stop_node.sh
+```
+
+3. 큐 probe (각 호스트에서)
+
+push 모드는 자기 볼륨뿐 아니라 push 대상 볼륨의 기록도 필요하므로 ALL=1로 잽니다.
+- sudo 비밀번호를 한 번 묻습니다.
+- 스토리지(eternitystorage)에는 ssh 키로 읽기만 합니다.
+- 볼륨 3개 × 8큐라 1분 안쪽으로 끝납니다 (어림).
+
+```
+eternity4
+cd ~/raftof_clean
+ALL=1 ./scripts/probe_io_queues.sh
+eternity5
+cd ~/raftof_clean
+ALL=1 ./scripts/probe_io_queues.sh
+eternity6
+cd ~/raftof_clean
+ALL=1 ./scripts/probe_io_queues.sh
+```
+
+- 지금 기록은 eternity4.env 하나뿐입니다. eternity5와 6은 반드시 돌려야 합니다.
+- 4도 마지막 측정(11-09) 뒤에 재연결됐다면 다시 돌려야 합니다. 그대로 두면 3단계에서 기동이 중단됩니다.
+- TOPO=5, 7, 9로 띄울 거라면 probe에도 같은 TOPO를 줘야 합니다. 예: TOPO=5 ALL=1 ./scripts/probe_io_queues.sh.
+
+4. 기동
+
+측정할 때는 IO_PIN=1을 권합니다. 기본값 auto는 기록이 없으면 경고만 하고 고정 없이 띄웁니다. 그러면 LPersist가 실행마다 75µs씩 갈리던 원래 상태로 조용히 돌아갑니다.
+
+```
+eternity4
+cd ~/raftof_clean
+IO_PIN=1 ./start_node.sh 4 push rdma
+eternity5
+cd ~/raftof_clean
+IO_PIN=1 ./start_node.sh 5 push rdma
+eternity6
+cd ~/raftof_clean
+IO_PIN=1 ./start_node.sh 6 push rdma
+```
+
+IO_PIN 값과 관련 변수:
+
+┌──────────────────────────────────────────────────┬─────────────────────────────────────────────────────────────────────────────────────┐
+│                        값                        │                                        동작                                         │
+├──────────────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────┤
+│ auto (기본)                                       │ 기록이 있으면 고정. 없으면 경고만 하고 고정 없이 띄움. 기록이 재연결 전 것이면 중단   │
+├──────────────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────┤
+│ 1                                                │ 기록이 없어도 중단                                                                  │
+├──────────────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────┤
+│ 0                                                │ 고정 안 함 (예전 동작)                                                              │
+├──────────────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────┤
+│ IO_CPUS="10,11,12" / PUSH_CPUS="5=0,1,2/6=3,4,5" │ 기록 대신 직접 지정. cntlid 대조를 하지 않음                                        │
+├──────────────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────┤
+│ CPUS="9,22,25"                                   │ 실험용. 프로세스 전체를 그 CPU에 둠 (numactl --physcpubind)                         │
+└──────────────────────────────────────────────────┴─────────────────────────────────────────────────────────────────────────────────────┘
+
+- 9-node experiment
+1. 실행 중인 노드 정지
+
+eternity4
+cd /home/jongc/raftof_clean
+./stop_node.sh
+eternity5
+cd /home/jongc/raftof_clean
+./stop_node.sh
+eternity6
+cd /home/jongc/raftof_clean
+./stop_node.sh
+
+2. 빌린 노드에 볼륨 연결 (-i 8이 기본값)
+
+eternity7
+cd /home/jongc/raftof_clean
+./borrow_node.sh up
+eternity8
+cd /home/jongc/raftof_clean
+./borrow_node.sh up
+eternity9
+cd /home/jongc/raftof_clean
+./borrow_node.sh up
+eternity10
+cd /home/jongc/raftof_clean
+./borrow_node.sh up
+
+3. probe (9대에서 한꺼번에 실행해도 됨. 9볼륨 × 8큐라 호스트당 1~2분, 전부 합쳐 15~20분 정도 어림)
+
+eternity2
+cd /home/jongc/raftof_clean
+TOPO=9 ALL=1 ./scripts/probe_io_queues.sh
+eternity3
+cd /home/jongc/raftof_clean
+TOPO=9 ALL=1 ./scripts/probe_io_queues.sh
+eternity4
+cd /home/jongc/raftof_clean
+TOPO=9 ALL=1 ./scripts/probe_io_queues.sh
+eternity5
+cd /home/jongc/raftof_clean
+TOPO=9 ALL=1 ./scripts/probe_io_queues.sh
+eternity6
+cd /home/jongc/raftof_clean
+TOPO=9 ALL=1 ./scripts/probe_io_queues.sh
+eternity7
+cd /home/jongc/raftof_clean
+TOPO=9 ALL=1 ./scripts/probe_io_queues.sh
+eternity8
+cd /home/jongc/raftof_clean
+TOPO=9 ALL=1 ./scripts/probe_io_queues.sh
+eternity9
+cd /home/jongc/raftof_clean
+TOPO=9 ALL=1 ./scripts/probe_io_queues.sh
+eternity10
+cd /home/jongc/raftof_clean
+TOPO=9 ALL=1 ./scripts/probe_io_queues.sh
+
+4. 기동 (9대 모두 saved:가 찍힌 뒤에)
+
+eternity2
+cd /home/jongc/raftof_clean
+TOPO=9 IO_PIN=1 ./start_node.sh 2 push rdma
+eternity3
+cd /home/jongc/raftof_clean
+TOPO=9 IO_PIN=1 ./start_node.sh 3 push rdma
+eternity4
+cd /home/jongc/raftof_clean
+TOPO=9 IO_PIN=1 ./start_node.sh 4 push rdma
+eternity5
+cd /home/jongc/raftof_clean
+TOPO=9 IO_PIN=1 ./start_node.sh 5 push rdma
+eternity6
+cd /home/jongc/raftof_clean
+TOPO=9 IO_PIN=1 ./start_node.sh 6 push rdma
+eternity7
+cd /home/jongc/raftof_clean
+TOPO=9 IO_PIN=1 ./start_node.sh 7 push rdma
+eternity8
+cd /home/jongc/raftof_clean
+TOPO=9 IO_PIN=1 ./start_node.sh 8 push rdma
+eternity9
+cd /home/jongc/raftof_clean
+TOPO=9 IO_PIN=1 ./start_node.sh 9 push rdma
+eternity10
+cd /home/jongc/raftof_clean
+TOPO=9 IO_PIN=1 ./start_node.sh 10 push rdma
+
+참고
+
+- 9노드 push에서는 리더 한 대에 push IoWorker 8개가 생깁니다. 각자 job이 끝날 때마다 1ms씩 스핀하고, 대상마다 고정 CPU 집합이 겹칠 수 있습니다. 결과를 볼 때 리더 CPU 사용률도 같이 보는 게 좋습니다.
+- 실험이 끝나면 eternity7~10에서 ./borrow_node.sh down을 잊지 마세요. 다른 사람 노드입니다. 단, 그 뒤에 다시 up하면 cntlid가 바뀌므로 probe부터 다시 해야 합니다.
+
+## 11. remote pull 실험 절차 (3-node)
+eternity4 -> eternity1
+eternity5,6 -> eternitystorage
+
+- SSD 차이
+항목,eternity1 nvme0n1,eternitystorage PM983
+모델,"Samsung 970 EVO Plus 250GB (소비자용 M.2, TLC + SLC 캐시 ≈13 GB)",Samsung PM983 MZQLB960HAJR 960GB (엔터프라이즈)
+PLP / 캐시,"없음, write back → fdatasync가 실제 FLUSH → write through로 위장","있음, write through"
+LBA / PCIe / max_hw,"512/512, Gen3 x4, 128 KiB","512/512, Gen3 x4, 128 KiB"
+NUMA,SSD NUMA1 ↔ IB NUMA0 (소켓을 건넘),SSD NUMA0 = ibp59s0 NUMA0
+
+A 구성 설정 (raft_node·blockcopy 서버를 모두 멈춘 뒤, 이 순서로)
+
+eternity1
+cd /home/jongc/raftof_clean && ./remote_pull.sh up
+eternity4
+cd /home/jongc/raftof_clean && ./remote_pull.sh up
+cd /home/jongc/raftof_clean && sudo -E env NODE4_E1=1 STORAGE_SSH=eternity1 ./scripts/probe_io_queues.sh 4
+(probe가 실패하면 아래 eternity4 기동에 IO_PIN=0을 붙인다.)
+eternitystorage
+cd /home/jongc/raftof_clean && ./remote_pull.sh up
+cd /home/jongc/raftof_clean && NODE4_E1=1 ./start_blockcopy.sh rdma
+
+eternity4 — 리더 먼저 (remote pull)
+
+cd /home/jongc/raftof_clean && NODE4_E1=1 ./start_node.sh 4 destination rdma
+eternity5
+
+cd /home/jongc/raftof_clean && NODE4_E1=1 ./start_node.sh 5 destination rdma
+eternity6
+
+cd /home/jongc/raftof_clean && NODE4_E1=1 ./start_node.sh 6 destination rdma
+eternity4 로그의 became leader와 스윕의 leader: 10.0.0.4를 확인한다. 이어서 같은 구성에서 세 노드를 normal 모드로 다시 띄워 대조 arm(normal@A)을 돌린다(서버는 쓰지 않는다).
+
+검증
+
+- eternity1 /sys/block/nvme0n1/stat: remote pull 중에 읽기가 늘고, flush_ios(16번 필드)는 늘지 않아야 한다.
+- eternitystorage 서버 로그: SWrite는 local pull과 비슷하고 SRead만 커져야 한다. SWrite까지 달라지면 서버 쪽 조건이 바뀐 것이니 원인을 먼저 찾는다.
+- fio(읽기 전용, eternitystorage에서 QD1, --direct=1 --readonly, 4k/64k/1M randread): e1node1 장치 vs PM983 node4(by-id …509494). eternity1에서는 nvme0n1을 로컬로 같은 조건으로 잰다. 이렇게 "네트워크 홉"과 "970
+  vs PM983 매체"를 나눈다.
+- 정합성: compare_raw.sh로 리더 링과 팔로워 링을 데이터 끝까지 비교한다.
+
+원복 (raft_node·서버를 멈춘 뒤)
+
+eternitystorage
+cd /home/jongc/raftof_clean && ./remote_pull.sh down
+eternity4
+cd /home/jongc/raftof_clean && ./remote_pull.sh down
+eternity1
+cd /home/jongc/raftof_clean && ./remote_pull.sh down
+각 호스트에서 ./remote_pull.sh status로 확인한다. 스크립트 자체는 bash -n으로 문법을 검사하고, 세 호스트에서 status를 실행해 본다(읽기만 한다). up/down은 sudo가 필요하므로 사용자가 직접 실행한다.

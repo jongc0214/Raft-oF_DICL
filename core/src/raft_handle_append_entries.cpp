@@ -1,6 +1,7 @@
 #include "raft_server.h"
 #include "raft_constants.h"
 #include "raft_basics.h"
+#include "raft_event_log.h"
 #include "cached_fd.h"   /* CachedFD 역참조 */
 
 #include <chrono>
@@ -160,6 +161,9 @@ void Server::handle_append_entries_request(const AppendEntriesRequest &req,
     update_term(req.rpc.term);
 
     if (req.rpc.term == raft.current_term && raft.state == ServerState::Candidate) {
+        election_log(raft.id, "candidate -> follower: n%llu won term=%llu",
+                     static_cast<unsigned long long>(req.leader_id),
+                     static_cast<unsigned long long>(raft.current_term));
         raft.state = ServerState::Follower;
     }
 
@@ -176,6 +180,15 @@ void Server::handle_append_entries_request(const AppendEntriesRequest &req,
     }
 
     reset_election_timeout();
+
+    /* 이번 term 의 리더를 처음 알게 됐다 -- 매 AE 마다가 아니라 바뀔 때 한 번 */
+    if (raft.leader_id != req.leader_id) {
+        election_log(raft.id, "following leader n%llu term=%llu (was n%llu)",
+                     static_cast<unsigned long long>(req.leader_id),
+                     static_cast<unsigned long long>(raft.current_term),
+                     static_cast<unsigned long long>(raft.leader_id));
+        raft.leader_id = req.leader_id;
+    }
 
     /* PrevLog consistency check */
     if (req.prev_log_index > 0) {

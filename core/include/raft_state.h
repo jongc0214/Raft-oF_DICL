@@ -263,6 +263,13 @@ struct RaftState {
     uint64_t last_applied = 0;
     ServerState state = ServerState::Follower;
 
+    /* 이번 term 에 알고 있는 리더의 id (0 = 모름). 팔로워는 AE 를 받아 알고,
+     * 리더는 자기 id, term 이 바뀌거나 후보가 되면 0. 관측용이다 -- 선거
+     * 이벤트 로그(raft_event_log.h)와 이후 클라이언트 leader hint 에 쓴다. */
+    uint64_t leader_id = 0;
+    /* 마지막으로 후보가 된 시각 -- "became leader ... in N ms" 계산용 */
+    std::chrono::steady_clock::time_point candidate_since{};
+
     /* ---- 클러스터 멤버십 ----
      * cluster[cluster_index]가 이 노드 자신이다. 멤버별 next_index /
      * match_index / voted_for / 전송 핸들은 ClusterMember에 있다. */

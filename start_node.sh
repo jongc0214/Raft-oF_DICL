@@ -77,6 +77,18 @@ DEVICE="$(device_for_id "$ID")" || { echo "ERROR: node $ID 자기 볼륨을 찾�
 
 LOG="$RAFT_ROOT/raft_node_${ID}_${MODE}_${TRANSPORT_MODE}.log"
 
+# LOCAL_RUN=1 (기본): 실행 파일을 LOCAL_DIR(/var/tmp/raftof-<user>)로 복사해 돌리고 로그도 로컬에 쓴다.
+#   저장소($LOG)에는 기동 배너만 두고, stop_node.sh 가 전체 로그로 덮어쓴다 (env.sh 로컬 실행 참고).
+#   0 이면 예전처럼 build/raft_node 를 NFS 에서 돌리고 $LOG 에 바로 쓴다.
+NODE_BIN="$RAFT_ROOT/build/raft_node"
+RUN_LOG="$LOG"
+BIN_SHA="-"
+if [[ "${LOCAL_RUN:-1}" == "1" ]]; then
+    read -r NODE_BIN BIN_SHA <<< "$(stage_binary "$RAFT_ROOT/build/raft_node")" || exit 1
+    [[ -n "$NODE_BIN" ]] || exit 1
+    RUN_LOG="$LOCAL_DIR/${LOG##*/}"
+fi
+
 # NUMA 고정: IB 카드가 꽂힌 소켓의 코어·메모리에서만 돌게 한다. 카드 위치가 호스트마다
 # 다르다 (eternity7/8 은 NUMA1, 나머지 NUMA0). 반대 소켓에서 돌면 패킷·완료 처리가
 # 소켓 간 링크를 건너 노드마다 지연 조건이 달라진다. NUMA_BIND=0 이면 끈다.
@@ -87,11 +99,11 @@ NUMA_DESC="off"
 # 사본(third_party/lib, eternity1 의 3.21.12 와 같은 파일)을 쓴다. 패키지가 있으면 쓰지 않는다.
 # sudo 가 LD_LIBRARY_PATH 를 지우므로 env 로 넘긴다.
 LIB_PREFIX=()
-if ldd "$RAFT_ROOT/build/raft_node" 2>/dev/null | grep -q 'not found'; then
+if ldd "$NODE_BIN" 2>/dev/null | grep -q 'not found'; then
     LIB_DIR="$RAFT_ROOT/third_party/lib"
-    if LD_LIBRARY_PATH="$LIB_DIR" ldd "$RAFT_ROOT/build/raft_node" | grep -q 'not found'; then
+    if LD_LIBRARY_PATH="$LIB_DIR" ldd "$NODE_BIN" | grep -q 'not found'; then
         echo "ERROR: raft_node 의 공유 라이브러리를 찾지 못했다:"
-        LD_LIBRARY_PATH="$LIB_DIR" ldd "$RAFT_ROOT/build/raft_node" | grep 'not found'
+        LD_LIBRARY_PATH="$LIB_DIR" ldd "$NODE_BIN" | grep 'not found'
         exit 1
     fi
     LIB_PREFIX=(env "LD_LIBRARY_PATH=$LIB_DIR")
@@ -123,6 +135,7 @@ fi
 #   IO_PIN=1            기록이 없어도 중단
 #   IO_PIN=0            고정하지 않는다
 #   IO_CPUS="..." / PUSH_CPUS="5=..../6=...."  기록 대신 직접 지정 (대조하지 않는다)
+#   IO_SAME_NODE=1 (기본)  기록의 CPU 중 IB NUMA 노드 안의 것만 쓴다 (아래 same_node). 0 이면 기록 그대로
 IO_PIN="${IO_PIN:-auto}"
 IOQ_FILE="$RAFT_ROOT/results/io_queues/$(hostname -s).env"
 IO_ARGS=()
@@ -144,6 +157,41 @@ ioq_cpus() {
     fi
     echo "${!vp}"
 }
+# 같은 소켓 규칙 (11-12 측정): IO CPU 는 프로세스를 묶은 IB NUMA 노드 안에서만 고른다.
+#   -io-cpus 는 Apply/RPC 스레드만 옮긴다. 그 CPU 가 IB 노드 밖이면 AE 스레드(IB 노드)의 커밋 통지를
+#   소켓 너머로 받고 메모리도 원격이라 QuorumWait 가 3~4us 늘고 큰 크기에서 튄다 (S 구성 node4:
+#   probe 가 NUMA1 을 골라 QW 22~49 -> NUMA0 고정 시 19~22, Total 은 전 크기에서 같거나 나음).
+#   probe 가 고른 CPU 중 IB 노드에 속한 것만 남기고, 하나도 없으면 IB 노드 CPU 전체를 쓴다
+#   (그 노드의 큐가 모두 느리다는 뜻 -- 큰 쓰기의 LPersist 가 늘어나는 대가를 감수한다).
+#   IO_SAME_NODE=0 이면 예전처럼 probe 기록을 그대로 쓴다. IO_CPUS/PUSH_CPUS 직접 지정과
+#   CPUS(physcpubind) 에는 적용하지 않는다.
+IO_SAME_NODE="${IO_SAME_NODE:-1}"
+SAME_NODE_CPUS=""
+if [[ "$IO_SAME_NODE" == "1" && "${NUMA_BIND:-1}" == "1" && -z "${CPUS:-}" \
+      && "${IB_NUMA:-}" =~ ^[0-9]+$ && -r "/sys/devices/system/node/node$IB_NUMA/cpulist" ]]; then
+    for r in $(tr ',' ' ' < "/sys/devices/system/node/node$IB_NUMA/cpulist"); do
+        if [[ "$r" == *-* ]]; then
+            for ((c = ${r%-*}; c <= ${r#*-}; c++)); do SAME_NODE_CPUS+="${SAME_NODE_CPUS:+,}$c"; done
+        else
+            SAME_NODE_CPUS+="${SAME_NODE_CPUS:+,}$r"
+        fi
+    done
+fi
+# same_node <cpu목록> <설명> -> IB 노드에 속한 CPU 만 (없으면 IB 노드 전체). 바뀌면 stderr 에 알린다.
+same_node() {
+    local list="$1" what="$2" out="" c
+    [[ -n "$SAME_NODE_CPUS" && -n "$list" ]] || { echo "$list"; return 0; }
+    for c in ${list//,/ }; do
+        [[ ",$SAME_NODE_CPUS," == *",$c,"* ]] && out+="${out:+,}$c"
+    done
+    if [[ -z "$out" ]]; then
+        echo "NOTE: $what: probe CPU($list)가 전부 IB 노드($IB_NUMA) 밖 -> IB 노드 CPU 전체로 고정 (그 노드 큐는 느린 큐)" >&2
+        out="$SAME_NODE_CPUS"
+    elif [[ "$out" != "$list" ]]; then
+        echo "NOTE: $what: IB 노드($IB_NUMA) 밖 CPU 를 뺐다: $list -> $out" >&2
+    fi
+    echo "$out"
+}
 if [[ "$IO_PIN" != "0" ]]; then
     [[ -f "$IOQ_FILE" ]] && source "$IOQ_FILE"
     if [[ -n "${IO_CPUS:-}" ]]; then
@@ -155,7 +203,10 @@ if [[ "$IO_PIN" != "0" ]]; then
     elif [[ -z "$own_cpus" ]]; then
         IO_DESC="off (빠른 큐 없음, $IOQ_FILE)"
     else
-        IO_ARGS+=(-io-cpus "$own_cpus"); IO_DESC="$own_cpus ($IOQ_FILE)"
+        pinned="$(same_node "$own_cpus" "node $ID io")"
+        IO_ARGS+=(-io-cpus "$pinned")
+        if [[ "$pinned" == "$own_cpus" ]]; then IO_DESC="$pinned ($IOQ_FILE)"
+        else IO_DESC="$pinned (IB 노드 $IB_NUMA 규칙, probe: $own_cpus)"; fi
     fi
     if [[ "$MODE" == "push" ]]; then
         if [[ -n "${PUSH_CPUS:-}" ]]; then
@@ -170,6 +221,7 @@ if [[ "$IO_PIN" != "0" ]]; then
                     ioq_fail "push 대상 node $peer 의 큐 기록이 없다 (ALL=1 ./scripts/probe_io_queues.sh)"
                     continue
                 fi
+                [[ -n "$pc" ]] && pc="$(same_node "$pc" "push $peer")"
                 [[ -n "$pc" ]] && pmap+="${pmap:+/}${peer}=${pc}"
             done
             [[ -n "$pmap" ]] && IO_ARGS+=(-push-cpus "$pmap")
@@ -197,7 +249,12 @@ echo "ae-batch    : $AE_BATCH"
 echo "numa bind   : $NUMA_DESC"
 echo "io cpus     : $IO_DESC"
 [[ -n "$PUSH_CPU_DESC" ]] && echo "push cpus   : $PUSH_CPU_DESC"
-echo "log         : $LOG"
+if [[ "$RUN_LOG" == "$LOG" ]]; then
+    echo "log         : $LOG"
+else
+    echo "binary      : $NODE_BIN (sha $BIN_SHA)"
+    echo "log         : $RUN_LOG (로컬; 저장소 $LOG 에는 배너만, stop_node.sh 가 전체를 가져온다)"
+fi
 echo "========================================"
 
 if [[ ! -b "$DEVICE" ]]; then
@@ -233,7 +290,7 @@ fi
 # 뒤에 온 값이 이기므로 아래 고정값(-sm noop 등)도 여기서 덮어쓸 수 있다.
 read -r -a EXTRA_ARR <<< "${EXTRA_ARGS:-}"
 
-sudo "${LIB_PREFIX[@]}" "${NUMA_PREFIX[@]}" stdbuf -oL -eL ./build/raft_node \
+sudo "${LIB_PREFIX[@]}" "${NUMA_PREFIX[@]}" stdbuf -oL -eL "$NODE_BIN" \
     -id "$ID" \
     -cluster "$CLUSTER" \
     -metadata-dir "$META_DIR" \
@@ -251,18 +308,28 @@ sudo "${LIB_PREFIX[@]}" "${NUMA_PREFIX[@]}" stdbuf -oL -eL ./build/raft_node \
     -profile \
     -sm noop \
     "${EXTRA_ARR[@]}" \
-    > "$LOG" 2>&1 &
+    > "$RUN_LOG" 2>&1 &
 
 # -gc-max-reqs "$MAX_GC_REQ" \
 # -gc-max-bytes "$MAX_GC_BYTES" \
 PID=$!
 
+if [[ "$RUN_LOG" != "$LOG" ]]; then
+    printf 'LLOG=%q\nRLOG=%q\nSHA=%q\n' "$RUN_LOG" "$LOG" "$BIN_SHA" > "$LOCAL_DIR/running_node_${ID}.env"
+fi
+
 sleep 1
 
 if ! ps -p "$PID" >/dev/null 2>&1; then
     echo "ERROR: raft_node exited during startup"
-    tail -100 "$LOG"
+    tail -100 "$RUN_LOG"
+    [[ "$RUN_LOG" != "$LOG" ]] && collect_local_logs "node_${ID}"
     exit 1
+fi
+
+# 스윕의 record_io_pin 이 읽는 기동 배너(io cpus / push device)를 저장소 로그 경로에 둔다
+if [[ "$RUN_LOG" != "$LOG" ]]; then
+    publish_banner "$RUN_LOG" "$LOG" "$BIN_SHA" '^  term/tail'
 fi
 
 echo
@@ -273,4 +340,11 @@ echo
 pgrep -af '[r]aft_node' || true
 
 echo
-tail -30 "$LOG"
+# FOLLOW=1: 기동 후 로그를 터미널에 계속 띄운다 (tail -f). 노드는 백그라운드라
+# Ctrl-C 는 tail 만 끊고 raft_node 는 계속 돈다. 끌 때는 ./stop_node.sh.
+# 디버그 상태 줄까지 보려면 EXTRA_ARGS="-debug" 와 같이 준다.
+if [[ "${FOLLOW:-0}" == "1" ]]; then
+    echo "---- following $RUN_LOG (Ctrl-C 는 tail 만 끊는다) ----"
+    exec tail -n 30 -f "$RUN_LOG"
+fi
+tail -30 "$RUN_LOG"

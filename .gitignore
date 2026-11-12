@@ -30,13 +30,11 @@ DECISIONS.md
 E2E_EXPERIMENT.md
 BLKCOPY_EXPERIMENT.md
 HANDOFF.md
-raft_blockcopy_server_tcp.log
-raft_node_4_destination_tcp.log
-raft_node_5_destination_tcp.log
-raft_node_6_destination_tcp.log
 
 csv/
+*.csv
 *.nfs
+*.txt
 
 # 패키지가 없는 호스트(빌린 eternity8~10)용 런타임 라이브러리 사본 (start_node.sh 가 필요할 때만 씀)
 third_party/lib/

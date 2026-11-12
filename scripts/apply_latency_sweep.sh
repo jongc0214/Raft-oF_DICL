@@ -144,6 +144,15 @@ WARMUP_N="${WARMUP_N:-$(( (RING_BYTES / warmup_slot_bytes) * 12 / 10 + 1 ))}"
 
 CLIENT="$BIN/raft_client"
 
+# 클라이언트를 로컬 디스크에서 돌린다 (LOCAL_CLIENT=1, 기본).
+# 저장소($REPO)는 NFS 라 실행 파일 페이지 폴트와 로그 쓰기가 가끔 수백 ms 멈춘다
+# (2026-11-12 eternity4 측정: 한 줄 쓰기 p50 4us, 40초에 >100ms 5번, 최대 428ms).
+# 측정 중인 클라이언트가 그 사이에 걸리면 Total 이 부푼다. 그래서
+#   - raft_client 를 LOCAL_DIR 로 복사해 거기서 실행하고
+#   - 클라이언트 출력도 LOCAL_DIR/run 에 쓴 뒤, 끝나고 나서 OUTDIR(NFS) 로 옮긴다 (run_client).
+LOCAL_CLIENT="${LOCAL_CLIENT:-1}"
+LOCAL_DIR="${LOCAL_DIR:-/var/tmp/raftof-$(id -un)}"
+
 log()  { printf '\n=== %s\n' "$*"; }
 ok()   { printf '  [ok]   %s\n' "$*"; }
 warn() { printf '  [warn] %s\n' "$*"; }
@@ -168,6 +177,36 @@ if [ ! -x "$CLIENT" ]; then
 fi
 
 mkdir -p "$OUTDIR" || exit 1
+
+RUN_DIR=""
+if [ "$LOCAL_CLIENT" = "1" ]; then
+    mkdir -p "$LOCAL_DIR/run" || { fail "cannot create $LOCAL_DIR/run"; exit 1; }
+    case "$(findmnt -no FSTYPE -T "$LOCAL_DIR" 2>/dev/null)" in
+        nfs*|cifs|smb*|fuse*) fail "LOCAL_DIR=$LOCAL_DIR 가 로컬 디스크가 아니다"; exit 1 ;;
+    esac
+    if ! cmp -s "$CLIENT" "$LOCAL_DIR/raft_client"; then
+        cp "$CLIENT" "$LOCAL_DIR/raft_client.tmp" && mv -f "$LOCAL_DIR/raft_client.tmp" "$LOCAL_DIR/raft_client" ||
+            { fail "cannot copy $CLIENT -> $LOCAL_DIR"; exit 1; }
+    fi
+    CLIENT="$LOCAL_DIR/raft_client"
+    RUN_DIR="$(mktemp -d "$LOCAL_DIR/run/sweep.XXXXXX")" || exit 1
+    trap 'rm -rf "$RUN_DIR"' EXIT
+fi
+
+# run_client <OUTDIR 안의 로그 경로> <raft_client 인자...>
+#   LOCAL_CLIENT=1 이면 로컬에 쓰고 끝난 뒤 그 경로로 옮긴다. 종료 코드는 클라이언트 것.
+run_client() {
+    local dest="$1"; shift
+    if [ -z "$RUN_DIR" ]; then
+        "$CLIENT" "$@" > "$dest" 2>&1
+        return $?
+    fi
+    local tmp="$RUN_DIR/${dest##*/}" rc
+    "$CLIENT" "$@" > "$tmp" 2>&1
+    rc=$?
+    mv -f "$tmp" "$dest" || cp "$tmp" "$dest"
+    return $rc
+}
 
 log "output -> $OUTDIR"
 # 노드별 persist 스레드 CPU 고정 상태 (start_node.sh IO_PIN) -- LPersist/StorageIO 해석에 필요
@@ -223,8 +262,7 @@ fi
 # ---------------------------------------------------------------------------
 log "preflight: commit-index"
 naddrs=$(printf '%s\n' "$ADDRS" | tr ',' '\n' | grep -c '[^[:space:]]')
-"$CLIENT" -addrs "$ADDRS" -op commit-index -transport "$TRANSPORT" \
-    > "$OUTDIR/preflight.log" 2>&1
+run_client "$OUTDIR/preflight.log" -addrs "$ADDRS" -op commit-index -transport "$TRANSPORT"
 rc=$?
 sed 's/^/       /' "$OUTDIR/preflight.log"
 nreach=$(grep -c 'commit_index=' "$OUTDIR/preflight.log")
@@ -240,9 +278,8 @@ ok "$nreach/$naddrs nodes answered"
 # ---------------------------------------------------------------------------
 if [ "$WARMUP" != "0" ]; then
     log "warmup: $WARMUP_N × ${WARMUP_SIZE}B (cmd ${WARMUP_CMD}B, ring=${RING_BYTES}B, ~1.2 laps) -- discarded"
-    "$CLIENT" -addrs "$ADDRS" -op apply -n "$WARMUP_N" -size "$WARMUP_CMD" \
-        -batch "$WARMUP_BATCH" -timeout-s "$TIMEOUT_S" -transport "$TRANSPORT" \
-        > "$OUTDIR/warmup.log" 2>&1
+    run_client "$OUTDIR/warmup.log" -addrs "$ADDRS" -op apply -n "$WARMUP_N" -size "$WARMUP_CMD" \
+        -batch "$WARMUP_BATCH" -timeout-s "$TIMEOUT_S" -transport "$TRANSPORT"
     if [ $? -ne 0 ]; then
         fail "warmup failed -- see $OUTDIR/warmup.log"
         tail -5 "$OUTDIR/warmup.log" | sed 's/^/       /'
@@ -261,6 +298,14 @@ echo "size_bytes,n_samples,term,mean_us,p50_us,p99_us,wall_ms,busy_retries" \
 FAILED=0
 POINTS=0
 PROFILE_CHECKED=0
+POINT_LEADER=""   # run_point 가 채운다: 이번 지점의 클라이언트가 찾은 리더 주소
+PREV_LEADER=""    # 직전 지점의 리더 -- 바뀌면 재선출이 일어난 것이다
+
+# 클라이언트 로그의 "leader: <addr> (probe ...)" 줄에서 주소만 뽑는다.
+# 리더 탐색 전에 죽었으면 빈 문자열이다.
+parse_leader() {
+    sed -n 's/^leader: \([^ ]*\).*/\1/p' "$1" | tail -1
+}
 
 # $1 rep   $2 size
 run_point() {
@@ -270,10 +315,11 @@ run_point() {
     local plog="$OUTDIR/apply-timed-r${rep}-${size}.log"
     local cmd=$(( size - HDR ))   # ENTRY_SIZES=1 이면 헤더를 뺀 명령 크기
 
-    "$CLIENT" -addrs "$ADDRS" -op apply-timed -n "$N" -size "$cmd" \
-        -batch "$BATCH" -timeout-s "$TIMEOUT_S" -transport "$TRANSPORT" \
-        > "$plog" 2>&1
+    run_client "$plog" -addrs "$ADDRS" -op apply-timed -n "$N" -size "$cmd" \
+        -batch "$BATCH" -timeout-s "$TIMEOUT_S" -transport "$TRANSPORT"
     local rc=$?
+    # 실패한 지점이라도 리더 탐색까지 갔으면 리더 줄은 남아 있다
+    POINT_LEADER=$(parse_leader "$plog")
     if [ $rc -ne 0 ]; then
         fail "size=$slabel rep=$rep -- client exited $rc, see $plog"
         tail -3 "$plog" | sed 's/^/       /'
@@ -281,8 +327,8 @@ run_point() {
     fi
 
     # ---- 지점 메타. 전부 ^ 로 앵커한다 -- per-RPC 줄에도 "total=" 이 있다
-    # 리더가 누구였는지는 CSV 에 넣지 않는다 -- 원본 로그의 "leader:" 줄에 남는다
-    # (E2E_EXPERIMENT.md §7-5 는 그것을 기록하라고 한다)
+    # 리더가 누구였는지는 CSV 에 넣지 않는다 -- 원본 로그의 "leader:" 줄에 남고,
+    # 스윕 루프가 rep 마다 화면에 찍는다 (E2E_EXPERIMENT.md §7-5)
     local n_samples wall_ms busy
     n_samples=$(sed -n 's/^apply-timed summary (n=\([0-9]*\) samples.*/\1/p' "$plog" | tail -1)
     wall_ms=$(sed -n 's/^applied .*, \([0-9.]*\) ms total.*/\1/p' "$plog" | tail -1)
@@ -370,10 +416,25 @@ run_point() {
 
 log "sweep: sizes =$(for s in $SWEEP_SIZES; do printf ' %s' "$(size_label "$s")"; done)"
 for rep in $(seq 1 "$REPS"); do
+    log "rep $rep/$REPS"
+    rep_leaders=""
     for size in $SWEEP_SIZES; do
         POINTS=$((POINTS + 1))
+        POINT_LEADER=""
         run_point "$rep" "$size" || FAILED=$((FAILED + 1))
+        # 리더는 지점(클라이언트 실행)마다 새로 찾는다. 지점 사이에 바뀌면 바로 알린다
+        if [ -n "$POINT_LEADER" ]; then
+            if [ -n "$PREV_LEADER" ] && [ "$POINT_LEADER" != "$PREV_LEADER" ]; then
+                warn "leader changed: $PREV_LEADER -> $POINT_LEADER (before size=$(size_label "$size") rep=$rep)"
+            fi
+            PREV_LEADER="$POINT_LEADER"
+            case " $rep_leaders " in
+                *" $POINT_LEADER "*) ;;
+                *) rep_leaders="${rep_leaders:+$rep_leaders }$POINT_LEADER" ;;
+            esac
+        fi
     done
+    printf '  rep %s leader: %s\n' "$rep" "${rep_leaders:-unknown}"
 done
 
 # ---------------------------------------------------------------------------
