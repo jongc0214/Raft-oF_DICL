@@ -324,11 +324,11 @@ eternity6 (팔로워)  0..0   written / 1..4095   unwritten
 **PBA 는 매 기동마다 바뀐다.** 외우지 말고 매번 `filefrag` 로 다시 뽑는다:
 
 ```bash
-# 1) 각 링 파일의 시작 PBA -> 512B 섹터 오프셋 (+1 = 512B 헤더 건너뜀)
+# 1) 각 링 파일의 시작 PBA -> 512B 섹터 오프셋 (+8 = 4KiB 헤더 페이지 건너뜀, D24. 예전에는 +1)
 for hi in eternity7:7 eternity5:5 eternity6:6; do
   h=${hi%%:*}; id=${hi##*:}
   blk=$(ssh $h "filefrag -v /mnt/raftvol/node$id/raft-$id.ring | awk 'NR==4{print \$4}'" | tr -d '.')
-  echo "id=$id  skip=$((blk*8+1))"
+  echo "id=$id  skip=$((blk*8+8))"
 done
 ```
 

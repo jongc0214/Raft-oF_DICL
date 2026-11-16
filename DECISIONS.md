@@ -352,6 +352,108 @@ p50/p99 를 보고한다.
 실제 페이로드보다 크게 잡히고, proto 오버헤드는 실측 600 KB에 32 B다.
 **단일 엔트리가 ~1 MiB를 넘으면 이 모드+RDMA로는 보낼 수 없다** (전송이 명시적 예외로 실패).
 
+## D24. 스토리지 읽기 제거 프로토타입: nvmet 파일 백엔드 + 버퍼드 src 읽기 (2026-11-13)
+
+(D23은 stash@{0}의 인라인 워커/BC-STATS 작업에 예약돼 있다.)
+
+**상태 (2026-11-14): 원복 완료.** node4/5/6 은 다시 SSD 를 bdev 백엔드로 내보낸다(arm A). 코드 변경(결정 1 읽기 fd 분리,
+결정 2 헤더 4K 분리)은 유지한다 — 블록 장치 경로에서는 읽기도 O_DIRECT(배너 `read=direct`)라 예전 동작과 같고, 결정 2 의
+온디스크 배치 변경은 모든 모드에 남는다. 스토리지 전환·원복 절차는 runbook 25절(C = 1~5단계, C′ = 9단계, 원복 = 7단계).
+
+destination 모드의 `WritePBABatch`는 리더 링을 `pread`(SSD 읽기)한 뒤 팔로워 볼륨에 `pwrite`+`fdatasync`한다.
+그 데이터는 직전에 리더가 NVMe-oF로 쓴 것인데, nvmet **bdev 백엔드**는 bio로 바로 내려가므로 스토리지
+메모리에 남지 않는다. namespace를 **스토리지 측 파일시스템 위 백킹 파일 + `buffered_io=1`**로 바꾸면
+리더 쓰기가 그 파일의 page cache에 남고, 같은 파일을 버퍼드로 읽으면 SSD 읽기가 사라진다.
+리더 프로세스는 그대로 O_DIRECT + fdatasync이고(컴퓨트 page cache 미사용), fdatasync → NVMe flush →
+`vfs_fsync`로 SSD까지 내려간 뒤 페이지가 clean으로 남는다. 커밋 시점 내구성은 같다.
+
+**성격:** 배포용이 아니라 "스토리지 읽기를 없애면 얼마나 이득인가"의 상한 측정. 대가로 LPersist가
+page cache 복사·writeback으로 늘 수 있다. 배포형(SPDK 타깃 안에서 버퍼 유지)은 결과를 보고 정한다.
+
+**결정 1 — 장치별 읽기/쓰기 fd 분리 (`storage/raft_blockcopy_server.*`).** `O_DIRECT`는 fd 단위 속성이라
+한 fd로 "읽기는 page cache, 쓰기는 O_DIRECT"를 할 수 없다. `-devices` 경로가 **일반 파일**이면 src 읽기용
+`O_RDONLY` fd를 따로 열고(`open_device_for_read`), 블록 장치면 쓰기 fd(O_DIRECT)로 읽는다(= 예전 동작).
+요청의 `src_dev`는 읽기 fd, `dst_dev`는 쓰기 fd. 새 플래그 없이 경로 종류로 정해지고, 배너
+`device[i]: … read=buffered|direct`로 구성을 구분한다.
+- 블록 장치를 버퍼드로 읽으면 안 된다: nvmet bdev 백엔드의 bio는 장치 page cache를 무효화하지 않아,
+  링이 돈 뒤 옛 데이터를 에러 없이 읽는다.
+- 복사 쓰기는 O_DIRECT로 둔다: 배치 끝 fdatasync로 SSD 쓰기는 어차피 하므로 버퍼드 쓰기는 memcpy와
+  writeback만 늘린다. 버퍼드 쓰기 옵션은 검토 후 두지 않았다.
+
+**결정 2 — 링 헤더가 4K 페이지를 혼자 쓴다 (`RING_OFFSET = PAGE_SIZE`, 예전 512).** 헤더(term/votedFor)는
+팔로워가 NVMe-oF로(=buffered nvmet 경유로) 쓰고 슬롯은 BlockCopyServer가 O_DIRECT로 쓴다. 둘이 같은
+4K 페이지에 있으면, DIO 뒤 page cache 무효화가 헤더 쓰기의 재-dirty와 겹쳐 실패할 때 옛 슬롯 내용이
+writeback으로 DIO 데이터를 조용히 덮을 수 있다(커널 경고 `Page cache invalidation failure on direct I/O`).
+컴퓨트 ext4 블록이 4K라 링 블록은 다른 파일·메타데이터와 페이지를 공유하지 않고, 노드가 리더가 되어 자기
+슬롯을 쓰는 경우는 AE 핸들러가 `mu`를 잡고 복사를 끝낸 뒤라 겹치지 않으므로, 남는 공유 지점은 헤더뿐이었다.
+`ring_slots = total_slots - SLOTS_PER_PAGE`. 헤더 내용(512B)은 그대로. `compare_raw.sh`의 skip은 `블록 x 8 + 8`.
+
+**대조군 주의:**
+- 결정 2는 **모든 모드의 온디스크 배치**를 바꾼다(슬롯 0이 4K 정렬 → 복사 청크 정렬도 바뀔 수 있음).
+  이 리비전 이전 CSV와 직접 비교하지 말 것. arm A(bdev)도 이 리비전으로 다시 잰다.
+- buffered nvmet 구성에서는 normal/push 기준선도 바뀐다(LPersist 경로가 같으므로).
+- 링은 기동마다 새로 만들어지므로(ZERO_RANGE) 옛 링 파일 호환 문제는 없다.
+
+**보정 (2026-11-13, 실측):** nvmet **파일 백엔드는 블록 크기를 백킹 파일 FS 블록(ext4 4096)으로 정해**
+namespace LBA가 4096이 됐고, 512B O_DIRECT 헤더·슬롯 쓰기가 EINVAL로 죽었다. 그래서 vol.img를
+`losetup --direct-io=off --sector-size 512` loop 장치로 붙여 nvmet은 그 loop를 **bdev 백엔드**로 내보낸다
+(`buffered_io`는 쓰지 않는다). loop가 백킹 파일에 버퍼드로 쓰므로 page cache 적중 원리는 같고, flush는 loop가
+`vfs_fsync`로 처리한다. 대가로 쓰기 경로에 loop 작업 스레드 한 단계가 더 붙는다(LPersist에 포함됨).
+`start_blockcopy.sh`는 nvmet 장치가 loop면 백킹 파일끼리 비교한다. 절차는 runbook 25절(6단계는 재부팅·파일 백엔드 상태에서의 복구).
+
+**측정 설계 (A vs C):** A = bdev 백엔드(현재), C = node4/5/6을 ext4 위 64GiB `vol.img` → loop(512B, 버퍼드) → nvmet bdev.
+읽기 제거 효과는 StorageIO의 read 성분, 쓰기 경로 비용은 LPersist로 따로 잡히므로 중간 arm은 두지 않는다.
+런마다 스토리지 `dmesg | grep -i "invalidation failure"`가 비어 있고 `compare_raw.sh`가 일치해야 한다.
+측정 결과 (2026-11-13, confS node4/5/6, p50 µs, A = bdev, C = loop; csv/lat_breakdown_rdma_1113-114614·114849 / 121651·121938):
+
+| | 64B A→C | 16K A→C | 256K A→C |
+|---|---|---|---|
+| destination StorageIO (읽기 제거) | 76.8→52.6 | 96.2→66.3 | 480.9→217.3 |
+| LPersist (destination) | 56.9→76.7 | 80.8→107.5 | 241.2→450.2 |
+| normal StorageIO (= LPersist 와 같은 경로) | 53.4→75.2 | 77.5→106.7 | 261.9→453.6 |
+| Total destination / normal | 175.9→174.6 / 147.3→188.7 | 219.8→223.3 / 214.8→279.1 | 778.8→730.3 / 852.8→1244.3 |
+
+**C 의 쓰기 경로 비용 분해 (256K, 스토리지 bpftrace, results/trace_loop_256k_dest2.txt, 리더 node4 = loop0):**
+리더의 pwrite 는 loop WRITE(101: 큐 4 + page cache 복사 93), fdatasync 는 loop FLUSH(196) 가 된다. FLUSH 는 전부
+전체 fsync(datasync=0)이고 그 안은 writeback 139(bio 내보내기 33 + 완료 대기 106) + 저널 커밋 대기 47 + SSD flush 1
+(PM983 write-through) + 기타 약 2. 저널 커밋은 이 런에서 flush 마다 한 번(20,046회, 평균 42). SSD 128K 쓰기 한 개는
+평균 70, 256K writeback 은 128K 두 개로 arm A 와 같은 분할이다.
+A 에서는 SSD 쓰기가 write 명령 안에서 끝나고 flush 는 공짜이므로, 증가분 ≈ 복사 ~100 + (writeback 139 − A 의 직접 쓰기
+~80, **추정**) + 저널 47 ≈ +215 로 실측 +209~219 와 맞는다. 64B/16K 의 +20~27 은 처음에 저널 커밋으로 봤으나 소형 크기는
+추적하지 않았다. C′(저널·loop 없음)에서 −9/−14 만 줄었으므로 저널+loop 큐가 약 절반, 나머지(+11~13)는 page cache 경유로
+본다(**추정**).
+**해석:** 읽기 제거 효과는 destination StorageIO 감소분으로 깨끗하게 잡힌다. 쓰기 쪽 손해는 커널 loop 의 페이지 단위
+복사, page cache writeback, 스토리지 ext4 저널(loop flush = 전체 fsync)에서 오는 프로토타입 구성의 부산물이다.
+arm C 의 normal 기준선은 이 손해를 그대로 받으므로 destination 과 normal 비교에는 arm A 를 쓴다.
+
+**arm C′ (2026-11-14): loop 제거 — 스토리지 FS 를 XFS v4(`-b size=512 -m crc=0`)로, vol.img 를 nvmet 파일 백엔드
+(`buffered_io=1`)로.** 파일 백엔드 LBA = `min(i_blkbits, 12)` = 512 라 loop 없이 512B O_DIRECT 가 된다(컴퓨트 LOG-SEC 512
+확인). flush 는 `vfs_fsync(file, 1)`(fdatasync). runbook 25절 9단계. csv/armCp_dest, csv/armCp_normal. p50 µs, A / C / C′:
+
+| | 64B | 16K | 256K |
+|---|---|---|---|
+| destination StorageIO | 76.8 / 52.6 / 55.0 | 96.2 / 66.3 / 68.2 | 480.9 / 217.3 / 210.3 |
+| LPersist (destination) | 56.9 / 76.7 / 67.7 | 80.8 / 107.5 / 93.5 | 241.2 / 450.2 / 320.2 |
+| normal StorageIO | 53.4 / 75.2 / 62.2 | 77.5 / 106.7 / 92.1 | 261.9 / 453.6 / 334.9 |
+| Total destination | 175.9 / 174.6 / 167.4 | 219.8 / 223.3 / 207.2 | 778.8 / 730.3 / 590.5 |
+| Total normal | 147.3 / 188.7 / 169.3 | 214.8 / 279.1 / 247.4 | 852.8 / 1244.3 / 1003.2 |
+| Total p99 destination | 201.0 / 239.3 / 193.4 | 247.8 / 290.4 / 232.8 | 853.0 / 774.2 / 623.0 |
+
+읽기 제거 효과(StorageIO)는 C 와 같다. 256K LPersist 는 C 대비 −130 으로, loop 제거로 예상한 몫(저널 47 + loop 큐 ~7)보다
+~75 더 줄었다. **원인 미확인** — 후보: loop 는 bvec(페이지)마다 `vfs_iter_write` 를 따로 부르지만 파일 백엔드는 요청당
+한 번, XFS 512B 블록의 블록 단위 dirty 추적. A 대비 쓰기 손해는 256K +79, 64B +11, 16K +13 으로 남는다.
+destination Total 은 세 크기 모두 A 보다 낮아졌다(256K −188, −24%).
+
+**검증·환경:** 측정 설계에 적은 `compare_raw.sh` 정합성 비교는 **실시하지 않았다**. `invalidation failure` 점검은 C 런에서는
+했고, C′ 런은 sudo 확인 기록이 없다(일반 권한 확인 0건, Dirty 376kB). 클라이언트는 eternity5 에서 돌았다(node5 팔로워와 같은
+호스트, CPU 미고정) — 세 arm 이 같은 조건이라 arm 간 차이는 유효하지만 절대값에는 간섭이 섞였을 수 있다.
+
+**결론:** 스토리지 읽기를 메모리에서 서빙하면 destination 의 복사(StorageIO)가 256K 에서 절반 아래로 줄고, page cache 를 빌린
+C′ 에서도 전체 지연이 A 보다 낮다. 남은 쓰기 손해(256K +79)는 page cache write-back 구조(복사 + flush 때 writeback)에서 온다.
+배포형은 타깃이 SSD 에 write-through 로 쓰면서 받은 버퍼를 보관하는 방식(예: SPDK nvmf 타깃 수정)이라 이 손해가 없을 것이다.
+**미확인:** C′ 가 C 보다 예상 이상(~75) 줄어든 원인, 스토리지 로컬 쓰기와 캐시 읽기의 분리 — [BC-STATS](D23) 또는 C′ 용
+추적(`trace_loop_persist.bt` 는 loop probe 라 C′ 에 못 씀)이 필요하다.
+
 ## U. 미해결 — 리팩토링 중 마주치면 여기를 볼 것
 
 | # | 항목 | 위치 | 상태 |

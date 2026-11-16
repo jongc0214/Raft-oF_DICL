@@ -28,6 +28,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+
+#include <sys/stat.h>
 #include <vector>
 #include <sstream>
 #include <thread>
@@ -43,7 +45,8 @@ void usage(const char *prog) {
         "  -addr         listen address (default 0.0.0.0:5050)\n"
         "  -transport    rdma (default) | tcp\n"
         "  -devices      comma-separated NVMe device paths, one per cluster\n"
-        "                member index (default /dev/nvme0n1)\n"
+        "                member index (default /dev/nvme0n1). A regular file\n"
+        "                (nvmet file-backed namespace) is read buffered\n"
         "  -copy-workers parallel workers per WritePBABatch (default: nproc,\n"
         "                capped at 16)\n",
         prog);
@@ -87,7 +90,10 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    /* 장치마다 쓰기 fd(O_DIRECT)와, 일반 파일이면 src 읽기 fd(버퍼드)를 연다 (D24).
+     * 블록 장치는 읽기도 쓰기 fd(O_DIRECT)로 한다 -- 배너의 read= 로 구성을 구분한다. */
     std::vector<int> fds(devices.size());
+    std::vector<int> read_fds(devices.size(), -1);
     for (size_t i = 0; i < devices.size(); i++) {
         int fd = nvmeof_raft::blockcopy::open_device(devices[i]);
         if (fd < 0) {
@@ -95,7 +101,18 @@ int main(int argc, char **argv) {
             return 1;
         }
         fds[i] = fd;
-        std::printf("  device[%zu]: %s (fd=%d)\n", i, devices[i].c_str(), fd);
+        struct stat st{};
+        bool is_file = ::stat(devices[i].c_str(), &st) == 0 && S_ISREG(st.st_mode);
+        if (is_file) {
+            read_fds[i] = nvmeof_raft::blockcopy::open_device_for_read(devices[i]);
+            if (read_fds[i] < 0) {
+                std::fprintf(stderr, "failed to open device[%zu] %s for buffered read\n",
+                             i, devices[i].c_str());
+                return 1;
+            }
+        }
+        std::printf("  device[%zu]: %s (fd=%d, read=%s)\n", i, devices[i].c_str(), fd,
+                    is_file ? "buffered" : "direct");
     }
 
     if (copy_workers < 1) {
@@ -103,7 +120,7 @@ int main(int argc, char **argv) {
     }
     std::printf("  copy-workers : %d (per WritePBABatch)\n", copy_workers);
 
-    nvmeof_raft::blockcopy::BlockCopyServer server(fds, devices, copy_workers);
+    nvmeof_raft::blockcopy::BlockCopyServer server(fds, devices, copy_workers, read_fds);
 
     nvmeof_raft::TransportKind transport_kind = nvmeof_raft::TransportKind::Rdma;
     if (!nvmeof_raft::parse_transport_kind(transport, &transport_kind)) {

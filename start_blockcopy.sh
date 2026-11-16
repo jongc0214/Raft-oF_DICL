@@ -48,9 +48,11 @@ fi
 echo "========================================"
 
 IFS=',' read -r -a BC_DEV_ARR <<< "$BC_DEVICES"
+# 블록 장치(nvmet bdev 백엔드) 또는 일반 파일(nvmet 파일 백엔드의 백킹 파일, D24).
+# 일반 파일이면 서버가 src를 버퍼드로 읽는다(배너 read=buffered).
 for dev in "${BC_DEV_ARR[@]}"; do
-    if [[ ! -b "$dev" ]]; then
-        echo "ERROR: block device not found: $dev"
+    if [[ ! -b "$dev" && ! -f "$dev" ]]; then
+        echo "ERROR: block device or backing file not found: $dev"
         exit 1
     fi
 done
@@ -66,6 +68,10 @@ for i in "${!NODE_ARR[@]}"; do
     for dp in "$NVMET/node$id"/namespaces/*/device_path; do
         [[ -r "$dp" ]] && want="$(readlink -f "$(cat "$dp")")"
     done
+    # D24: nvmet 이 loop 장치를 내보내면 -devices 에는 그 백킹 파일(vol.img)을 준다 -> 백킹 파일끼리 비교
+    if [[ "$want" == /dev/loop* && -r "/sys/block/${want##*/}/loop/backing_file" ]]; then
+        want="$(readlink -f "$(cat "/sys/block/${want##*/}/loop/backing_file")")"
+    fi
     have="$(readlink -f "$dev")"
     if [[ -n "$want" && "$want" == "$have" ]]; then
         echo "node$id -> $dev ($have) == nvmet node$id OK"

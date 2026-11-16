@@ -131,25 +131,32 @@ TEST_CASE("from_extents는 입력을 logical 순으로 정렬한다") {
 }
 
 TEST_CASE("링 슬롯 오프셋이 실제 extent 경계와 맞물린다") {
-    /* 링 파일은 헤더 512B(RING_OFFSET) 뒤부터 슬롯 0이다. 4KiB extent로
-     * 단편화된 파일에서 슬롯 8(=오프셋 512+4096)은 두 번째 extent에 걸친다.
-     * 이 계산이 어긋나면 PBA 복사가 남의 데이터를 읽는다. */
+    /* 링 파일은 헤더 페이지(RING_OFFSET = 4096) 뒤부터 슬롯 0이다 (D24).
+     * 4KiB extent로 단편화된 파일에서 슬롯 0~7은 두 번째 extent, 슬롯 8
+     * (=오프셋 4096+4096)은 세 번째 extent다. 이 계산이 어긋나면 PBA 복사가
+     * 남의 데이터를 읽는다. */
     ExtentCache c = ExtentCache::from_extents({
         Extent{0,    100000, 4096},
         Extent{4096, 900000, 4096},
+        Extent{8192, 500000, 4096},
     });
 
     CHECK(slot_offset(0) == static_cast<int64_t>(RING_OFFSET));
 
-    /* 슬롯 0은 첫 extent 안. 헤더 512B를 뺀 만큼만 남는다. */
+    /* 슬롯 0은 두 번째 extent의 시작. 헤더 extent와 겹치지 않고 페이지 전체가 남는다. */
     auto r0 = c.remaining_at(slot_offset(0), -1);
-    CHECK(r0.first == 4096 - RING_OFFSET);
-    CHECK(r0.second == 0);
+    CHECK(r0.first == 4096);
+    CHECK(r0.second == 1);
 
-    /* 슬롯 7의 끝이 첫 extent 끝(4096)과 정확히 일치한다:
-     * 512 + 7*512 = 4096 -> 이미 두 번째 extent */
-    CHECK(slot_offset(7) == 4096);
+    /* 슬롯 7은 두 번째 extent의 마지막 섹터: 4096 + 7*512 = 7680 */
+    CHECK(slot_offset(7) == 7680);
     auto r7 = c.remaining_at(slot_offset(7), -1);
     CHECK(r7.second == 1);
-    CHECK(r7.first == 4096);
+    CHECK(r7.first == 512);
+
+    /* 슬롯 8은 세 번째 extent의 시작 */
+    CHECK(slot_offset(8) == 8192);
+    auto r8 = c.remaining_at(slot_offset(8), -1);
+    CHECK(r8.second == 2);
+    CHECK(r8.first == 4096);
 }

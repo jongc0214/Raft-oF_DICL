@@ -84,11 +84,11 @@ void AlignedBuffer::reset(){
 
 void RingLog::configure(uint64_t pages){
     if (pages < 2) {
-        pages = 2;   /* 헤더 1섹터 + 최소한의 링 */
+        pages = 2;   /* 헤더 1페이지 + 최소한의 링 */
     }
     num_pages = pages;
     total_slots = pages * SLOTS_PER_PAGE;
-    ring_slots = total_slots - 1;
+    ring_slots = total_slots - RING_OFFSET / SECTOR_SIZE;   /* 헤더 페이지만큼 뺀다 */
 }
 
 std::string to_string(LogEntryState st) {

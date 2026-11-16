@@ -71,10 +71,10 @@ export TRANSPORT
 # 기본값: env.sh 의 NODES/TOPO 로 만든 IPoIB 주소 (노드를 띄운 것과 같은 TOPO 를 줄 것)
 export ADDRS="${ADDRS:-$(source "$REPO/env.sh" >/dev/null 2>&1 && build_cluster ipoib >/dev/null 2>&1 && echo "$ADDRS")}"
 # export SIZES="${SIZES:-64 256 1024 4096 16384 65536 262144}"
-export SIZES="${SIZES:-262144}"
+export SIZES="${SIZES:-64 16384 262144}" 
 export ENTRY_SIZES=1   # SIZES 는 헤더 포함 엔트리 크기
 export REPS="${REPS:-2}"
-export N="${N:-50000}"
+export N="${N:-20000}"
 export BATCH=1
 
 "$REPO/scripts/apply_latency_sweep.sh" "$OUTDIR"

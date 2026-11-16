@@ -1,0 +1,197 @@
+#!/usr/bin/env bpftrace
+/*
+ * trace_loop_persist.bt -- D24 loop 구성에서 쓰기 경로(LPersist / normal StorageIO)가
+ * 어디서 시간을 쓰는지 스토리지(eternitystorage)에서 나눠 본다. runbook 25절 "8. 추적".
+ *
+ * 컴퓨트의 pwrite(O_DIRECT) + fdatasync 는 스토리지에서 이렇게 보인다:
+ *   pwrite    -> nvmet -> loop WRITE 요청 -> lo_write_simple (vol.img page cache 로 4K 페이지씩 복사)
+ *   fdatasync -> nvmet -> loop FLUSH 요청 -> vfs_fsync(vol.img, datasync=0) = ext4_sync_file
+ *                 ├ file_write_and_wait_range   writeback
+ *                 │    ├ do_writepages           dirty 페이지를 bio 로 내보내기
+ *                 │    └ (나머지)                 SSD 쓰기 완료 대기
+ *                 ├ jbd2_complete_transaction   저널 커밋 대기 (수정 시각)
+ *                 ├ blkdev_issue_flush          SSD 캐시 flush
+ *                 └ (나머지)                     ext4_sync_file 의 그 밖
+ *
+ * 출력 키:
+ *   lo      = loop 번호 (losetup -l 로 nodeN 과 대응)
+ *   op      = 1 WRITE, 2 FLUSH
+ *   bytes   = WRITE 는 요청 크기, FLUSH 와 f_* 는 "그 loop 의 직전 WRITE 크기"
+ *   maj,min = 블록 장치 번호 (lsblk -o NAME,MAJ:MIN)
+ * 단위: us. stats = [count, average, total].
+ *
+ * 2026-11-13 1차 추적에서 바꾼 것: 페이지마다 걸리던 vfs_iter_write probe 를 뺐다(256K 에서 ~46us
+ * 부풀림). 길이를 u64 로 맞추고 FLUSH 키를 "직전 WRITE 크기"로 바꿨다(1차는 모두 0 으로 나왔다).
+ * do_writepages 와 SSD 요청의 크기별 지연을 더했다.
+ *
+ * 사용: sudo bpftrace -o <출력파일> scripts/trace_loop_persist.bt   (측정이 끝나면 Ctrl-C)
+ * kprobe 비용이 더해지므로 이 런의 apply-timed 수치는 비교 측정에 쓰지 않는다.
+ */
+
+BEGIN
+{
+	printf("trace_loop_persist: tracing... Ctrl-C to stop\n");
+}
+
+/* ---------------- loop 요청: 큐 대기 / 처리 / 완료 ---------------- */
+
+kprobe:loop_queue_rq
+{
+	$rq = ((struct blk_mq_queue_data *)arg1)->rq;
+	@t_queued[$rq] = nsecs;
+}
+
+kprobe:do_req_filebacked
+{
+	$lo = (struct loop_device *)arg0;
+	$rq = (struct request *)arg1;
+	$op = (uint64)($rq->cmd_flags & 0xff);      /* REQ_OP_WRITE=1, REQ_OP_FLUSH=2 */
+	$n = (uint64)$lo->lo_number;
+	$len = (uint64)$rq->__data_len;
+	$key = (uint64)0;
+
+	if ($op == 1) {
+		@lastw[$n] = $len;
+		$key = $len;
+	} else {
+		$key = @lastw[$n];
+	}
+
+	if (@t_queued[$rq]) {
+		@loop_queue_wait_us[$n, $op, $key] = stats((nsecs - @t_queued[$rq]) / 1000);
+	}
+	@t_start[$rq] = nsecs;
+	@rq_lo[$rq] = $n;
+	@rq_op[$rq] = $op;
+	@rq_key[$rq] = $key;
+
+	@cur_rq[tid] = $rq;
+	@cur_op[tid] = $op;
+	@cur_lo[tid] = $n;
+	@cur_key[tid] = $key;
+}
+
+kretprobe:do_req_filebacked
+/@cur_rq[tid]/
+{
+	$rq = @cur_rq[tid];
+	@loop_exec_us[@cur_lo[tid], @cur_op[tid], @cur_key[tid]] = stats((nsecs - @t_start[$rq]) / 1000);
+	delete(@cur_rq[tid]);
+	delete(@cur_op[tid]);
+	delete(@cur_lo[tid]);
+	delete(@cur_key[tid]);
+}
+
+kprobe:lo_complete_rq
+{
+	$rq = (struct request *)arg0;
+	if (@t_queued[$rq] && @rq_op[$rq]) {
+		@loop_total_us[@rq_lo[$rq], @rq_op[$rq], @rq_key[$rq]] = stats((nsecs - @t_queued[$rq]) / 1000);
+	}
+	delete(@t_queued[$rq]);
+	delete(@t_start[$rq]);
+	delete(@rq_lo[$rq]);
+	delete(@rq_op[$rq]);
+	delete(@rq_key[$rq]);
+}
+
+/* ---------------- FLUSH 내부: ext4_sync_file 분해 ---------------- */
+
+kprobe:ext4_sync_file
+/@cur_op[tid] == 2/
+{
+	@t_fsync[tid] = nsecs;
+	@f_datasync_arg[arg3] = count();      /* 0 이면 전체 fsync (타임스탬프 때문에 저널 커밋) */
+}
+kretprobe:ext4_sync_file
+/@t_fsync[tid]/
+{
+	@f_ext4_sync_file_us[@cur_lo[tid], @cur_key[tid]] = stats((nsecs - @t_fsync[tid]) / 1000);
+	delete(@t_fsync[tid]);
+}
+
+kprobe:file_write_and_wait_range
+/@cur_op[tid] == 2/
+{
+	@t_wb[tid] = nsecs;
+}
+kretprobe:file_write_and_wait_range
+/@t_wb[tid]/
+{
+	@f_writeback_total_us[@cur_lo[tid], @cur_key[tid]] = stats((nsecs - @t_wb[tid]) / 1000);
+	delete(@t_wb[tid]);
+}
+
+kprobe:do_writepages
+/@t_wb[tid]/
+{
+	@t_dwp[tid] = nsecs;
+}
+kretprobe:do_writepages
+/@t_dwp[tid]/
+{
+	@f_writeback_submit_us[@cur_lo[tid], @cur_key[tid]] = stats((nsecs - @t_dwp[tid]) / 1000);
+	delete(@t_dwp[tid]);
+}
+
+kprobe:jbd2_complete_transaction
+/@cur_op[tid] == 2/
+{
+	@t_jbd[tid] = nsecs;
+}
+kretprobe:jbd2_complete_transaction
+/@t_jbd[tid]/
+{
+	@f_journal_commit_wait_us[@cur_lo[tid], @cur_key[tid]] = stats((nsecs - @t_jbd[tid]) / 1000);
+	delete(@t_jbd[tid]);
+}
+
+kprobe:blkdev_issue_flush
+/@cur_op[tid] == 2/
+{
+	@t_bf[tid] = nsecs;
+}
+kretprobe:blkdev_issue_flush
+/@t_bf[tid]/
+{
+	@f_blkdev_flush_us[@cur_lo[tid], @cur_key[tid]] = stats((nsecs - @t_bf[tid]) / 1000);
+	delete(@t_bf[tid]);
+}
+
+/* ---------------- 저널 커밋 (jbd2 스레드) ---------------- */
+
+tracepoint:jbd2:jbd2_start_commit
+{
+	@t_commit[args.dev, args.transaction] = nsecs;
+}
+tracepoint:jbd2:jbd2_end_commit
+/@t_commit[args.dev, args.transaction]/
+{
+	@jbd2_commit_us[args.dev >> 20, args.dev & 0xfffff] = stats((nsecs - @t_commit[args.dev, args.transaction]) / 1000);
+	delete(@t_commit[args.dev, args.transaction]);
+}
+
+/* ---------------- 블록 장치 요청 (SSD 와 loop 모두): 종류 x 크기별 지연 ---------------- */
+
+tracepoint:block:block_rq_issue
+{
+	@t_iss[args.dev, args.sector] = nsecs;
+	@sz_iss[args.dev, args.sector] = (uint64)args.bytes;
+}
+tracepoint:block:block_rq_complete
+/@t_iss[args.dev, args.sector]/
+{
+	@blk_lat_us[args.dev >> 20, args.dev & 0xfffff, args.rwbs, @sz_iss[args.dev, args.sector]] =
+		stats((nsecs - @t_iss[args.dev, args.sector]) / 1000);
+	delete(@t_iss[args.dev, args.sector]);
+	delete(@sz_iss[args.dev, args.sector]);
+}
+
+END
+{
+	clear(@t_queued); clear(@t_start); clear(@rq_lo); clear(@rq_op); clear(@rq_key);
+	clear(@cur_rq); clear(@cur_op); clear(@cur_lo); clear(@cur_key);
+	clear(@t_fsync); clear(@t_wb); clear(@t_dwp); clear(@t_jbd); clear(@t_bf);
+	clear(@t_commit); clear(@t_iss); clear(@sz_iss); clear(@lastw);
+	printf("\n=== keys: loop maps [lo, op(1=WRITE 2=FLUSH), bytes]; f_* maps [lo, bytes of preceding WRITE]; blk_lat [maj, min, rwbs, bytes]; jbd2 [maj, min] ===\n");
+}

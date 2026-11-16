@@ -64,7 +64,7 @@ void ensure_dir(const std::string &path) {
  * 1) 메타데이터(=링) 파일을 만들고 fallocate로 블록을 실제 할당
  * 2) CachedFD open (meta O_RDONLY / meta O_RDWR|O_DIRECT / device O_DIRECT x2)
  * 3) extent 캐시 빌드 (FIEMAP)
- * 4) 헤더(offset 0, 512B)를 읽어 term/votedFor 복구
+ * 4) 헤더(offset 0, 512B; 슬롯은 다음 4K 페이지부터)를 읽어 term/votedFor 복구
  * 5) sentinel 로그와 슬롯 상태 초기화
  *
  * 로그 인덱스 기준: log[0]은 sentinel이고 실제 엔트리는 인덱스 1부터

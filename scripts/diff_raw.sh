@@ -3,7 +3,7 @@
 # 스토리지 노드에서 sudo 로 실행 (읽기만 한다).
 #   사용: sudo ./scripts/diff_raw.sh <섹터수> <장치A:skip> <장치B:skip> [시작슬롯]
 #   skip 은 compare_raw.sh 와 같은 값. 시작슬롯 = 구간 첫 섹터의 링 슬롯 번호 (파일 첫 extent 면 0)
-# 슬롯 k 는 링 파일 오프셋 512 + k*512. 엔트리 헤더(슬롯 첫 32B) = term, cmd_len, num_slots, log_index (LE u64).
+# 슬롯 k 는 링 파일 오프셋 4096 + k*512 (D24: 헤더가 4K 페이지를 혼자 쓴다). 엔트리 헤더(슬롯 첫 32B) = term, cmd_len, num_slots, log_index (LE u64).
 set -uo pipefail
 [[ $# -ge 3 ]] || { sed -n '2,6p' "$0"; exit 2; }
 COUNT="$1"; A="$2"; B="$3"; BASE="${4:-0}"

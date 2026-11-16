@@ -2,7 +2,8 @@
 # 스토리지 노드에서 sudo로 실행: 세 볼륨의 raw 구간이 바이트 단위로 같은지 비교한다.
 # 사용: sudo ./compare_raw.sh <섹터수> <장치:skip> <장치:skip> <장치:skip>
 #   예: sudo ./compare_raw.sh 14500  /dev/nvme1n1:80478209  /dev/nvme3n1:71024641  /dev/nvme5n1:80904193
-#   skip = 컴퓨트 노드에서 filefrag로 구한 (첫 extent 물리 블록 x 8 + 1)
+#   skip = 컴퓨트 노드에서 filefrag로 구한 (첫 extent 물리 블록 x 8 + 8)
+#          링 슬롯 0은 헤더 페이지(4KiB = 8섹터) 뒤에서 시작한다 (D24, 예전에는 +1)
 set -uo pipefail
 COUNT="$1"; shift
 EMPTY_MD5="d41d8cd98f00b204e9800998ecf8427e"          # 0바이트 입력의 md5 (읽기에 실패했다는 신호)

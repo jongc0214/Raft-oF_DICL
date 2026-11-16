@@ -45,7 +45,22 @@ namespace blockcopy {
  * 이름은 같고 값은 다른 상태로 공존한 적이 있다. */
 constexpr size_t kAlign = blockio::kPageSize;
 
+/* 쓰기(겸 기본 읽기) fd: O_RDWR | O_DIRECT. */
 int open_device(const std::string &path);
+
+/* src 읽기 전용 fd (D24). path가 **일반 파일**이면 O_RDONLY(버퍼드)로 열어
+ * 반환하고, 그 밖(블록 장치 등)이면 -1을 반환한다 -- 호출자는 -1이면 쓰기 fd를
+ * 그대로 읽기에 쓴다(= 예전 동작, O_DIRECT 읽기).
+ *
+ * 왜 따로 여나: O_DIRECT는 fd 단위 속성이라 한 fd로 "읽기는 page cache, 쓰기는
+ * O_DIRECT"를 할 수 없다. nvmet 파일 백엔드(buffered_io=1)로 내보낸 볼륨은
+ * 리더가 NVMe-oF로 쓴 링이 그 파일의 page cache에 남아 있으므로, 같은 파일을
+ * 버퍼드로 읽으면 SSD 읽기 없이 복사할 수 있다.
+ *
+ * 왜 블록 장치는 안 되나: nvmet bdev 백엔드의 쓰기는 bio로 바로 내려가 장치의
+ * page cache를 무효화하지 않는다. 블록 장치를 버퍼드로 읽으면 링이 한 바퀴 돈 뒤
+ * 옛 데이터를 에러 없이 읽는다. */
+int open_device_for_read(const std::string &path);
 
 /* ============================================================
  * AlignedBufPool
@@ -107,7 +122,10 @@ struct GetTimeRsp { uint64_t read_nanos = 0, write_nanos = 0, other_nanos = 0; }
  * ============================================================ */
 class BlockCopyServer {
 public:
-    BlockCopyServer(std::vector<int> fds, std::vector<std::string> paths, int copy_workers);
+    /* fds: 장치별 쓰기 fd (dst). read_fds: 장치별 src 읽기 fd -- 비었거나 항목이
+     * -1이면 그 장치는 쓰기 fd로 읽는다. 두 벡터의 fd 모두 서버가 소유하고 닫는다. */
+    BlockCopyServer(std::vector<int> fds, std::vector<std::string> paths, int copy_workers,
+                    std::vector<int> read_fds = {});
 
     ~BlockCopyServer();
 
@@ -121,8 +139,10 @@ public:
 
 private:
     bool get_fd(int dev_idx, int &out_fd) const;
+    bool get_read_fd(int dev_idx, int &out_fd) const;   /* src 전용: read_fds_ 우선 */
 
     std::vector<int> fds_;
+    std::vector<int> read_fds_;   /* fds_와 같은 길이, -1 = fds_ 사용 */
     std::vector<std::string> paths_;
     int copy_workers_;
 

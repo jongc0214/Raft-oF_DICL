@@ -18,7 +18,13 @@ namespace nvmeof_raft {
 constexpr uint64_t SECTOR_SIZE = blockio::kSectorSize;
 constexpr uint64_t PAGE_SIZE = blockio::kPageSize;
 constexpr uint64_t HEADER_SIZE = SECTOR_SIZE;
-constexpr uint64_t RING_OFFSET = HEADER_SIZE;
+/* 슬롯 0은 헤더 섹터 바로 뒤가 아니라 **다음 4K 페이지**에서 시작한다 (D24).
+ * 헤더는 팔로워 자신이 NVMe-oF로 쓰고 슬롯은 스토리지의 BlockCopyServer가
+ * 쓴다. 둘이 같은 4K 페이지에 있으면 nvmet buffered_io 구성에서 page cache
+ * (헤더)와 O_DIRECT(슬롯) 쓰기가 한 페이지에 섞여, DIO 뒤 무효화가 실패할 때
+ * 옛 슬롯 내용이 writeback으로 DIO 데이터를 덮을 수 있다. 헤더 페이지의
+ * 나머지 3.5KiB는 비워 둔다. */
+constexpr uint64_t RING_OFFSET = PAGE_SIZE;
 
 /* ENTRY_META_SIZE: 각 엔트리 메타(Term, CmdLen, NumSlots, LogIndex)가
  * 슬롯 0의 앞부분에 packed되는 크기. Command 바이트는 이 뒤부터 시작 */

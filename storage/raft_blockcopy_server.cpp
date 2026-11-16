@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <time.h>
 
@@ -76,6 +77,14 @@ int open_device(const std::string &path) {
     return ::open(path.c_str(), O_RDWR | O_DIRECT);
 }
 
+int open_device_for_read(const std::string &path) {
+    struct stat st{};
+    if (::stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
+        return -1;   /* 블록 장치 등: 버퍼드로 읽으면 안 된다 (헤더 주석) */
+    }
+    return ::open(path.c_str(), O_RDONLY);
+}
+
 AlignedBufPool::~AlignedBufPool(){
         for (auto &b : free_) {
             free(b.first);
@@ -122,11 +131,19 @@ void AlignedBufPool::release(void *p, size_t cap){
     }
 
 BlockCopyServer::BlockCopyServer(std::vector<int> fds, std::vector<std::string> paths,
-                                 int copy_workers)
-        : fds_(std::move(fds)), paths_(std::move(paths)),
-          copy_workers_(copy_workers < 1 ? 1 : copy_workers) {}
+                                 int copy_workers, std::vector<int> read_fds)
+        : fds_(std::move(fds)), read_fds_(std::move(read_fds)), paths_(std::move(paths)),
+          copy_workers_(copy_workers < 1 ? 1 : copy_workers) {
+    read_fds_.resize(fds_.size(), -1);
+}
 
 BlockCopyServer::~BlockCopyServer(){
+        for (size_t i = 0; i < fds_.size(); i++) {
+            int rfd = read_fds_[i];
+            if (rfd >= 0 && rfd != fds_[i]) {
+                ::close(rfd);
+            }
+        }
         for (int fd : fds_) {
             if (fd >= 0) {
                 ::close(fd);
@@ -137,7 +154,7 @@ BlockCopyServer::~BlockCopyServer(){
 WritePBARsp BlockCopyServer::handle_write_pba(const WritePBAReq &req){
         WritePBARsp rsp;
         int src_fd, dst_fd;
-        if (!get_fd(req.src_dev, src_fd) || !get_fd(req.dst_dev, dst_fd)) {
+        if (!get_read_fd(req.src_dev, src_fd) || !get_fd(req.dst_dev, dst_fd)) {
             rsp.error = "device index out of range";
             return rsp;
         }
@@ -173,7 +190,7 @@ WritePBABatchRsp BlockCopyServer::handle_write_pba_batch(const WritePBABatchReq 
         }
 
         int src_fd, dst_fd;
-        if (!get_fd(req.src_dev, src_fd) || !get_fd(req.dst_dev, dst_fd)) {
+        if (!get_read_fd(req.src_dev, src_fd) || !get_fd(req.dst_dev, dst_fd)) {
             rsp.error = "device index out of range";
             return rsp;
         }
@@ -333,6 +350,17 @@ bool BlockCopyServer::get_fd(int dev_idx, int &out_fd) const{
             return false;
         }
         out_fd = fds_[static_cast<size_t>(dev_idx)];
+        return true;
+    }
+
+bool BlockCopyServer::get_read_fd(int dev_idx, int &out_fd) const{
+        if (!get_fd(dev_idx, out_fd)) {
+            return false;
+        }
+        int rfd = read_fds_[static_cast<size_t>(dev_idx)];
+        if (rfd >= 0) {
+            out_fd = rfd;
+        }
         return true;
     }
 

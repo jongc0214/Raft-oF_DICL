@@ -66,7 +66,10 @@ constexpr uint64_t kUsedBytes = 48;
 
 static_assert(kUsedBytes <= HEADER_SIZE, "파일 헤더 필드가 512B를 넘는다");
 static_assert(HEADER_SIZE == SECTOR_SIZE,
-              "헤더는 정확히 섹터 하나여야 한다 (RING_OFFSET 계산의 전제)");
+              "헤더는 정확히 섹터 하나여야 한다 (O_DIRECT 헤더 쓰기 단위)");
+static_assert(RING_OFFSET == PAGE_SIZE && HEADER_SIZE <= RING_OFFSET,
+              "헤더는 자기 4K 페이지를 혼자 쓴다 -- 슬롯과 페이지를 공유하면 안 된다 (D24)");
+static_assert(RING_OFFSET % SECTOR_SIZE == 0, "슬롯 경계는 섹터 정렬이어야 한다");
 
 } /* namespace file_hdr */
 

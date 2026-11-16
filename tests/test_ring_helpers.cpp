@@ -48,10 +48,10 @@ TEST_CASE("entry_slots: deferred 엔트리는 cmd_len으로 계산한다") {
     CHECK(entry_slots(loaded) == entry_slots(deferred));
 }
 
-TEST_CASE("slot_offset: 슬롯 0은 헤더 뒤에서 시작한다") {
+TEST_CASE("slot_offset: 슬롯 0은 헤더 페이지 다음 4K 페이지에서 시작한다") {
     CHECK(slot_offset(0) == static_cast<int64_t>(RING_OFFSET));
-    CHECK(RING_OFFSET == HEADER_SIZE);
-    CHECK(HEADER_SIZE == SECTOR_SIZE);   /* 헤더가 정확히 섹터 하나 */
+    CHECK(RING_OFFSET == PAGE_SIZE);     /* 헤더가 페이지를 혼자 쓴다 (D24) */
+    CHECK(HEADER_SIZE == SECTOR_SIZE);   /* 헤더 내용은 정확히 섹터 하나 */
 
     CHECK(slot_offset(1) == static_cast<int64_t>(RING_OFFSET + SECTOR_SIZE));
     CHECK(slot_offset(8) == static_cast<int64_t>(RING_OFFSET + PAGE_SIZE));
@@ -223,8 +223,8 @@ TEST_CASE("한 프로세스에 링 크기가 다른 Server를 여러 개 만들 
     CHECK(large->ring.num_pages == 65536);
     CHECK(small->ring.total_slots == 64 * SLOTS_PER_PAGE);
     CHECK(large->ring.total_slots == 65536 * SLOTS_PER_PAGE);
-    CHECK(small->ring.ring_slots == small->ring.total_slots - 1);
-    CHECK(large->ring.ring_slots == large->ring.total_slots - 1);
+    CHECK(small->ring.ring_slots == small->ring.total_slots - SLOTS_PER_PAGE);
+    CHECK(large->ring.ring_slots == large->ring.total_slots - SLOTS_PER_PAGE);
     CHECK(small->ring.file_size_bytes() == 64 * PAGE_SIZE);
     CHECK(large->ring.file_size_bytes() == 65536 * PAGE_SIZE);
 

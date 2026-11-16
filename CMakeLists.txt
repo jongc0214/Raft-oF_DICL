@@ -118,6 +118,8 @@ set(CORE_SRCS
     core/src/raft_apply.cpp
     core/src/raft_lifecycle.cpp
     core/src/raft_types.cpp
+    core/src/raft_push.cpp
+    core/src/raft_io_worker.cpp
 )
 
 # net/의 이 두 파일만 RDMA 버전으로 교체하면 core/는 안 건드려도 된다
@@ -272,6 +274,10 @@ add_executable(raft_unit_tests
     tests/test_ae_bookkeeping.cpp
     tests/test_apply_timings.cpp
     tests/test_election.cpp
+    # storage/raft_blockcopy_server.cpp 는 block_geometry.h 만 의존한다 --
+    # protobuf/net 없이 직접 넣어도 isolation_raft_unit_tests 가 유지된다.
+    tests/test_blockcopy_read_fd.cpp
+    storage/raft_blockcopy_server.cpp
 )
 target_include_directories(raft_unit_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 target_link_libraries(raft_unit_tests PRIVATE

@@ -280,7 +280,7 @@ struct RaftState {
 /* ============================================================
  * RingLog -- 단일 포인터 링버퍼의 상태.
  *
- * 온-디스크 링(헤더 512B + 슬롯들)에 대한 인메모리 부기다. 실제 인코딩과
+ * 온-디스크 링(헤더 512B가 든 4K 페이지 + 슬롯들)에 대한 인메모리 부기다. 실제 인코딩과
  * I/O는 Server::persist_circular / read_entry_direct가 하고, 이 struct는
  * "어디까지 썼고, 어디부터 살아 있고, 어느 인덱스가 어느 슬롯에 있는가"만
  * 들고 있다. 레이아웃 상수는 core/raft_basics.h에 있다.
@@ -348,7 +348,7 @@ struct RingLog {
      * 깨진다. */
     uint64_t num_pages = DEFAULT_NUM_PAGES;
     uint64_t total_slots = DEFAULT_NUM_PAGES * SLOTS_PER_PAGE;
-    uint64_t ring_slots = DEFAULT_NUM_PAGES * SLOTS_PER_PAGE - 1;
+    uint64_t ring_slots = DEFAULT_NUM_PAGES * SLOTS_PER_PAGE - RING_OFFSET / SECTOR_SIZE;
 
     void configure(uint64_t pages);
 

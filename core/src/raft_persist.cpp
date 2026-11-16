@@ -205,8 +205,8 @@ int64_t Server::persist_circular(bool write_log, int n_new_entries,
         put_u64_le(header.data() + file_hdr::kOffCommitIndex, raft.commit_index);
         put_u64_le(header.data() + file_hdr::kOffLastApplied, raft.last_applied);
 
-        /* Header lives at logical offset 0 (RING_OFFSET == HEADER_SIZE
-         * -- ring slot 0은 헤더 다음부터 시작, 원본 주석 그대로) */
+        /* Header lives at logical offset 0. 링 슬롯 0은 다음 4K 페이지
+         * (RING_OFFSET == PAGE_SIZE)에서 시작한다 -- 원본은 헤더 바로 뒤였다 (D24). */
         auto t_hdr_io = clock_type::now();
         io.cached_fd->write_at_file(header.data(), header.size(), 0);
         nvme_ns += elapsed_ns(t_hdr_io);   /* header 작성 시 writeI/O에 추가 */
