@@ -216,6 +216,8 @@ inline void append_entries_response_to_proto(const AppendEntriesResponse &g,
         ring_extent_to_proto(e, p->add_extent_map());
     }
     p->set_volume_wwid(g.volume_wwid);
+    p->set_storage_read_nanos(g.storage_read_ns);
+    p->set_storage_write_nanos(g.storage_write_ns);
 }
 
 inline void append_entries_response_from_proto(const rpcproto::AppendEntriesResponse &p,
@@ -227,6 +229,8 @@ inline void append_entries_response_from_proto(const rpcproto::AppendEntriesResp
     g.handler_duration_ns = p.handler_duration_nanos();
     g.write_pba_rt_ns = p.write_pba_rt_nanos();
     g.storage_copy_ns = p.storage_copy_nanos();
+    g.storage_read_ns = p.storage_read_nanos();
+    g.storage_write_ns = p.storage_write_nanos();
     g.handle_ae_lock_wait_ns = p.handle_ae_lock_wait_nanos();
     g.handle_ae_pre_ns = p.handle_ae_pre_nanos();
     g.handle_ae_lock_wait2_ns = p.handle_ae_lock_wait2_nanos();
@@ -302,6 +306,8 @@ inline void client_apply_timed_response_to_proto(const ClientApplyTimedResponse 
     p->set_post_rpc_nanos(g.post_rpc_ns);
     p->set_commit_wait_nanos(g.commit_wait_ns);
     p->set_wg_scheduling_nanos(g.wg_scheduling_ns);
+    p->set_storage_read_nanos(g.storage_read_ns);
+    p->set_storage_write_nanos(g.storage_write_ns);
 }
 
 inline void client_apply_timed_response_from_proto(const rpcproto::ClientApplyTimedResponse &p,
@@ -324,6 +330,8 @@ inline void client_apply_timed_response_from_proto(const rpcproto::ClientApplyTi
     g.post_rpc_ns = p.post_rpc_nanos();
     g.commit_wait_ns = p.commit_wait_nanos();
     g.wg_scheduling_ns = p.wg_scheduling_nanos();
+    g.storage_read_ns = p.storage_read_nanos();
+    g.storage_write_ns = p.storage_write_nanos();
 }
 
 inline void client_echo_request_to_proto(const ClientEchoRequest &g,

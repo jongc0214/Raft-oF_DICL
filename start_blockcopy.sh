@@ -69,6 +69,31 @@ read -r -a NODE_ARR <<< "$NODES"
 for i in "${!NODE_ARR[@]}"; do
     id="${NODE_ARR[$i]}"
     dev="${BC_DEV_ARR[$i]}"
+    # SPDK ublk (2026-11-17): /dev/ublkb<N> 은 spdk_tgt 의 bdev 를 바로 연 장치다 (루프백 없음).
+    #   ublk id = node id 규약이고, 그 디스크의 bdev 가 이 노드 볼륨(WT<id> / Nvme<id>n1 / Cache<id>)인지 확인한다.
+    if [[ "$dev" =~ ^/dev/ublkb([0-9]+)$ ]]; then
+        uid="${BASH_REMATCH[1]}"
+        if [[ "$uid" != "$id" ]]; then
+            echo "ERROR: node$id 에 $dev (ublk id $uid) -- ublk id 는 node id 와 같아야 한다 (env.sh POOL)"
+            exit 1
+        fi
+        ubdev="$(sudo /jongc/spdk_cache/scripts/rpc.py ublk_get_disks 2>/dev/null | python3 -c '
+import json, sys
+for d in json.load(sys.stdin):
+    if str(d.get("id")) == sys.argv[1]:
+        print(d.get("bdev_name", ""))' "$uid" 2>/dev/null || true)"
+        case "$ubdev" in
+            "WT$id"|"Nvme${id}n1"|"Cache$id")
+                echo "node$id -> $dev (ublk, bdev $ubdev) OK"
+                continue ;;
+            "")
+                echo "ERROR: node$id: ublk_get_disks 에 id $uid 가 없다 (spdk_tgt / ublk_start_disk 확인)"
+                exit 1 ;;
+            *)
+                echo "ERROR: node$id: $dev 의 bdev 가 $ubdev 다 (WT$id / Nvme${id}n1 / Cache$id 여야 한다)"
+                exit 1 ;;
+        esac
+    fi
     want=""
     for dp in "$NVMET/node$id"/namespaces/*/device_path; do
         [[ -r "$dp" ]] && want="$(readlink -f "$(cat "$dp")")"

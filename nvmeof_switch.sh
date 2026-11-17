@@ -8,6 +8,12 @@
 #   sudo ./nvmeof_switch.sh status
 #   sudo ./nvmeof_switch.sh tcp  [-n NQN | --all-members] [-i QUEUES] [-d EXPECT_DEV] [--dry-run] [--force]
 #   sudo ./nvmeof_switch.sh rdma [-n NQN | --all-members] [-i QUEUES] [-d EXPECT_DEV] [--dry-run] [--force]
+#   sudo ./nvmeof_switch.sh down --all-members [--dry-run]
+#
+#   down (2026-11-17): 멤버 볼륨을 umount 하고 전부 끊는다 (타깃을 내리기 전에. SPDK 타깃 교체 등).
+#   --all-members 로 다시 붙일 때 $MNT 가 비어 있으면 이 호스트 자기 볼륨(eternityN -> node N 의 POOL nqn)을
+#   마운트한다.
+#   SPDK 타깃 (11-17, spdk_target.sh): RDMA_PORT=4421 로 준다 -- sudo RDMA_PORT=4421 ./nvmeof_switch.sh rdma --all-members --force
 #
 #   망 (11-16): NVMe/TCP 는 NET 이 정한다. NET=eth(기본) -> 115.145.173.243:4421 (TCP 본 실험),
 #   NET=ipoib -> 10.0.0.91:4421 (tcp-ib). RDMA 는 늘 10.0.0.91:4420. 타깃 포트는 eternitystorage 의
@@ -303,20 +309,99 @@ switch_all() {
     nqns="$(source "$(dirname "$0")/env.sh" >/dev/null 2>&1; for id in $NODES; do _pool_field "$id" 3; done)"
     [[ -n "$nqns" ]] || die "env.sh 에서 멤버 nqn 을 얻지 못했다 (TOPO/NODES 확인)"
     echo "members ($NET): $(echo $nqns)"
+    [[ $DRY -eq 1 ]] || umount_if_stale
     for n in $nqns; do
         echo
         echo "---- $n ----"
         NQN="$n"; NQN_SRC="--all-members"
         switch_to "$target"
     done
+    mount_own_if_empty
     echo
     echo "=== 검증 ==="
     status
     echo "다음: ./scripts/probe_io_queues.sh 를 다시 돌린다 (재연결로 큐->CPU 배치가 바뀐다)"
 }
 
+# $MNT 의 장치가 사라졌으면(stale) 먼저 umount 한다 (11-17).
+#   마운트한 채로 컨트롤러가 끊기면(타깃 재시작, ctrl_loss_tmo, 마운트 중 disconnect) 다시 붙을 때
+#   커널이 새 namespace head(nvmeXn2 ...)를 만들고 마운트는 사라진 head 에 남는다. 그 장치는 어느
+#   subsystem 에도 안 보여서 아래 경로들이 "멤버 볼륨이 아니다" 로 건너뛰고 stale 마운트가 계속 남았다.
+umount_if_stale() {
+    local src
+    src="$(findmnt -no SOURCE "$MNT" 2>/dev/null || true)"
+    [[ -n "$src" && ! -b "$src" ]] || return 0
+    echo "WARN: $MNT 이 사라진 장치 $src 에 마운트돼 있다 (stale). umount 한다."
+    if command -v fuser >/dev/null && fuser -m "$MNT" >/dev/null 2>&1; then
+        fuser -vm "$MNT" >&2 || true
+        die "$MNT 을 쓰는 프로세스가 있다. 먼저 노드를 멈춰라 (./stop_node.sh)."
+    fi
+    run umount "$MNT" || run umount -l "$MNT"
+}
+
+member_nqns() {
+    (source "$(dirname "$0")/env.sh" >/dev/null 2>&1; for id in $NODES; do _pool_field "$id" 3; done)
+}
+
+# $MNT 가 비어 있으면 이 호스트 자기 볼륨을 마운트한다 (down 뒤에 다시 붙인 경우)
+mount_own_if_empty() {
+    local host num nqn d
+    findmnt -no SOURCE "$MNT" >/dev/null 2>&1 && return 0
+    host="${NVMEOF_HOST:-$(hostname -s)}"
+    [[ "$host" =~ ([0-9]+)$ ]] || { echo "$MNT 비어 있음: 호스트명에서 node id 를 못 얻어 마운트하지 않는다"; return 0; }
+    num="${BASH_REMATCH[1]}"
+    nqn="$(source "$(dirname "$0")/env.sh" >/dev/null 2>&1
+           for id in $NODES; do [[ "$id" == "$num" ]] && _pool_field "$id" 3; done; true)"
+    [[ -n "$nqn" ]] || { echo "$MNT 비어 있음: node $num 은 멤버가 아니라 마운트하지 않는다"; return 0; }
+    d="$(find_ns "$nqn" | head -n1 || true)"
+    [[ -n "$d" ]] || die "자기 볼륨 $nqn 의 장치가 없다"
+    run mount "/dev/$d" "$MNT"
+    [[ $DRY -eq 1 ]] || printf '%s\n' "$nqn" > "$STATE_FILE" 2>/dev/null || true
+}
+
+# down --all-members: 멤버 볼륨을 umount 하고 전부 끊는다
+down_all() {
+    local nqns n src base d
+    [[ $EUID -eq 0 ]] || die "root 로 실행하라 (sudo)."
+    [[ $ALL -eq 1 && -z "$NQN" ]] || die "down 은 --all-members 로만 쓴다"
+    nqns="$(member_nqns)"
+    [[ -n "$nqns" ]] || die "env.sh 에서 멤버 nqn 을 얻지 못했다 (TOPO/NODES 확인)"
+    echo "members: $(echo $nqns)"
+    [[ $DRY -eq 1 ]] || umount_if_stale
+    src="$(findmnt -no SOURCE "$MNT" 2>/dev/null || true)"
+    if [[ -n "$src" ]]; then
+        base="$(basename "$src")"; base="${base%p[0-9]*}"
+        n="$(nqn_of_dev "$base" || true)"
+        if printf '%s\n' $nqns | grep -qx "${n:-//}"; then
+            if command -v fuser >/dev/null && fuser -m "$MNT" >/dev/null 2>&1; then
+                fuser -vm "$MNT" >&2 || true
+                die "$MNT 을 쓰는 프로세스가 있다. 먼저 노드를 멈춰라 (./stop_node.sh)."
+            fi
+            run umount "$MNT"
+        else
+            echo "$MNT 의 $src 는 멤버 볼륨이 아니다 (그대로 둔다)."
+        fi
+    fi
+    for n in $nqns; do
+        for d in $(find_ns "$n"); do
+            if command -v fuser >/dev/null && fuser -s "/dev/$d" 2>/dev/null; then
+                fuser -v "/dev/$d" >&2 || true
+                die "/dev/$d ($n) 를 쓰는 프로세스가 있다. 먼저 멈춰라."
+            fi
+        done
+        if fabric_ctrls | awk -v n="$n" '$4==n {f=1} END {exit !f}'; then
+            run nvme disconnect -n "$n"
+        else
+            echo "$n: 연결 없음"
+        fi
+    done
+    echo
+    status
+}
+
 case "$CMD" in
     status)    status ;;
+    down)      down_all ;;
     tcp|rdma)  if [[ $ALL -eq 1 ]]; then switch_all "$CMD"; else switch_to "$CMD"; fi ;;
     *)         usage ;;
 esac

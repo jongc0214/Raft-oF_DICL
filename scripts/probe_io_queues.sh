@@ -114,7 +114,8 @@ for id in $IDS; do
     read -r ctrl cntlid <<< "$(ctrl_for_nqn "$nqn")" || exit 1
     [[ -n "$ctrl" ]] || { echo "ERROR: node $id ($nqn) 컨트롤러를 찾지 못했다"; exit 1; }
     mqdir=""
-    for p in /sys/class/nvme/"$ctrl"/"$ctrl"c*n*; do
+    # 경로 이름은 nvme<subsys>c<ctrl>n<ns> 다 -- subsys 번호가 ctrl 번호와 다를 수 있다 (11-17: nvme2 -> nvme1c2n2)
+    for p in /sys/class/nvme/"$ctrl"/nvme[0-9]*c"${ctrl#nvme}"n*; do
         [[ -d "$p/mq" ]] && { mqdir="$p/mq"; break; }
     done
     if [[ -z "$mqdir" && -d "/sys/block/${dev##*/}/mq" ]]; then mqdir="/sys/block/${dev##*/}/mq"; fi

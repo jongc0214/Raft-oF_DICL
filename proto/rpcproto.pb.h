@@ -1264,6 +1264,8 @@ class AppendEntriesResponse final :
     kHandleAePostNanosFieldNumber = 11,
     kHandleAePersistNanosFieldNumber = 12,
     kPushMapHashFieldNumber = 13,
+    kStorageReadNanosFieldNumber = 16,
+    kStorageWriteNanosFieldNumber = 17,
     kSuccessFieldNumber = 2,
   };
   // repeated .rpcproto.RingExtent extent_map = 14;
@@ -1406,6 +1408,24 @@ class AppendEntriesResponse final :
   void _internal_set_push_map_hash(uint64_t value);
   public:
 
+  // int64 storage_read_nanos = 16;
+  void clear_storage_read_nanos();
+  int64_t storage_read_nanos() const;
+  void set_storage_read_nanos(int64_t value);
+  private:
+  int64_t _internal_storage_read_nanos() const;
+  void _internal_set_storage_read_nanos(int64_t value);
+  public:
+
+  // int64 storage_write_nanos = 17;
+  void clear_storage_write_nanos();
+  int64_t storage_write_nanos() const;
+  void set_storage_write_nanos(int64_t value);
+  private:
+  int64_t _internal_storage_write_nanos() const;
+  void _internal_set_storage_write_nanos(int64_t value);
+  public:
+
   // bool success = 2;
   void clear_success();
   bool success() const;
@@ -1437,6 +1457,8 @@ class AppendEntriesResponse final :
     int64_t handle_ae_post_nanos_;
     int64_t handle_ae_persist_nanos_;
     uint64_t push_map_hash_;
+    int64_t storage_read_nanos_;
+    int64_t storage_write_nanos_;
     bool success_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
@@ -2527,6 +2549,8 @@ class ClientApplyTimedResponse final :
     kMutexANanosFieldNumber = 16,
     kMutexBNanosFieldNumber = 17,
     kMutexCNanosFieldNumber = 18,
+    kStorageReadNanosFieldNumber = 19,
+    kStorageWriteNanosFieldNumber = 20,
   };
   // string err = 1;
   void clear_err();
@@ -2695,6 +2719,24 @@ class ClientApplyTimedResponse final :
   void _internal_set_mutex_c_nanos(int64_t value);
   public:
 
+  // int64 storage_read_nanos = 19;
+  void clear_storage_read_nanos();
+  int64_t storage_read_nanos() const;
+  void set_storage_read_nanos(int64_t value);
+  private:
+  int64_t _internal_storage_read_nanos() const;
+  void _internal_set_storage_read_nanos(int64_t value);
+  public:
+
+  // int64 storage_write_nanos = 20;
+  void clear_storage_write_nanos();
+  int64_t storage_write_nanos() const;
+  void set_storage_write_nanos(int64_t value);
+  private:
+  int64_t _internal_storage_write_nanos() const;
+  void _internal_set_storage_write_nanos(int64_t value);
+  public:
+
   // @@protoc_insertion_point(class_scope:rpcproto.ClientApplyTimedResponse)
  private:
   class _Internal;
@@ -2721,6 +2763,8 @@ class ClientApplyTimedResponse final :
     int64_t mutex_a_nanos_;
     int64_t mutex_b_nanos_;
     int64_t mutex_c_nanos_;
+    int64_t storage_read_nanos_;
+    int64_t storage_write_nanos_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
   union { Impl_ _impl_; };
@@ -4911,6 +4955,46 @@ inline void AppendEntriesResponse::set_allocated_volume_wwid(std::string* volume
   // @@protoc_insertion_point(field_set_allocated:rpcproto.AppendEntriesResponse.volume_wwid)
 }
 
+// int64 storage_read_nanos = 16;
+inline void AppendEntriesResponse::clear_storage_read_nanos() {
+  _impl_.storage_read_nanos_ = int64_t{0};
+}
+inline int64_t AppendEntriesResponse::_internal_storage_read_nanos() const {
+  return _impl_.storage_read_nanos_;
+}
+inline int64_t AppendEntriesResponse::storage_read_nanos() const {
+  // @@protoc_insertion_point(field_get:rpcproto.AppendEntriesResponse.storage_read_nanos)
+  return _internal_storage_read_nanos();
+}
+inline void AppendEntriesResponse::_internal_set_storage_read_nanos(int64_t value) {
+  
+  _impl_.storage_read_nanos_ = value;
+}
+inline void AppendEntriesResponse::set_storage_read_nanos(int64_t value) {
+  _internal_set_storage_read_nanos(value);
+  // @@protoc_insertion_point(field_set:rpcproto.AppendEntriesResponse.storage_read_nanos)
+}
+
+// int64 storage_write_nanos = 17;
+inline void AppendEntriesResponse::clear_storage_write_nanos() {
+  _impl_.storage_write_nanos_ = int64_t{0};
+}
+inline int64_t AppendEntriesResponse::_internal_storage_write_nanos() const {
+  return _impl_.storage_write_nanos_;
+}
+inline int64_t AppendEntriesResponse::storage_write_nanos() const {
+  // @@protoc_insertion_point(field_get:rpcproto.AppendEntriesResponse.storage_write_nanos)
+  return _internal_storage_write_nanos();
+}
+inline void AppendEntriesResponse::_internal_set_storage_write_nanos(int64_t value) {
+  
+  _impl_.storage_write_nanos_ = value;
+}
+inline void AppendEntriesResponse::set_storage_write_nanos(int64_t value) {
+  _internal_set_storage_write_nanos(value);
+  // @@protoc_insertion_point(field_set:rpcproto.AppendEntriesResponse.storage_write_nanos)
+}
+
 // -------------------------------------------------------------------
 
 // WritePBABatchRequest
@@ -5894,6 +5978,46 @@ inline void ClientApplyTimedResponse::_internal_set_mutex_c_nanos(int64_t value)
 inline void ClientApplyTimedResponse::set_mutex_c_nanos(int64_t value) {
   _internal_set_mutex_c_nanos(value);
   // @@protoc_insertion_point(field_set:rpcproto.ClientApplyTimedResponse.mutex_c_nanos)
+}
+
+// int64 storage_read_nanos = 19;
+inline void ClientApplyTimedResponse::clear_storage_read_nanos() {
+  _impl_.storage_read_nanos_ = int64_t{0};
+}
+inline int64_t ClientApplyTimedResponse::_internal_storage_read_nanos() const {
+  return _impl_.storage_read_nanos_;
+}
+inline int64_t ClientApplyTimedResponse::storage_read_nanos() const {
+  // @@protoc_insertion_point(field_get:rpcproto.ClientApplyTimedResponse.storage_read_nanos)
+  return _internal_storage_read_nanos();
+}
+inline void ClientApplyTimedResponse::_internal_set_storage_read_nanos(int64_t value) {
+  
+  _impl_.storage_read_nanos_ = value;
+}
+inline void ClientApplyTimedResponse::set_storage_read_nanos(int64_t value) {
+  _internal_set_storage_read_nanos(value);
+  // @@protoc_insertion_point(field_set:rpcproto.ClientApplyTimedResponse.storage_read_nanos)
+}
+
+// int64 storage_write_nanos = 20;
+inline void ClientApplyTimedResponse::clear_storage_write_nanos() {
+  _impl_.storage_write_nanos_ = int64_t{0};
+}
+inline int64_t ClientApplyTimedResponse::_internal_storage_write_nanos() const {
+  return _impl_.storage_write_nanos_;
+}
+inline int64_t ClientApplyTimedResponse::storage_write_nanos() const {
+  // @@protoc_insertion_point(field_get:rpcproto.ClientApplyTimedResponse.storage_write_nanos)
+  return _internal_storage_write_nanos();
+}
+inline void ClientApplyTimedResponse::_internal_set_storage_write_nanos(int64_t value) {
+  
+  _impl_.storage_write_nanos_ = value;
+}
+inline void ClientApplyTimedResponse::set_storage_write_nanos(int64_t value) {
+  _internal_set_storage_write_nanos(value);
+  // @@protoc_insertion_point(field_set:rpcproto.ClientApplyTimedResponse.storage_write_nanos)
 }
 
 // -------------------------------------------------------------------

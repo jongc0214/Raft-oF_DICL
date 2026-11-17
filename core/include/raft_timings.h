@@ -60,6 +60,8 @@ struct ProfilingSink {
     std::atomic<int64_t> sample_r2_ns{0};
     std::atomic<int64_t> sample_write_pba_rt_ns{0};
     std::atomic<int64_t> sample_storage_copy_ns{0};
+    std::atomic<int64_t> sample_storage_read_ns{0};
+    std::atomic<int64_t> sample_storage_write_ns{0};
     std::atomic<int64_t> sample_mutex_ns{0};
     std::atomic<int64_t> sample_mutex_c_ns{0};
     

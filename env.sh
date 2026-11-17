@@ -23,11 +23,13 @@ POOL=(
     "1|10.0.0.1:6000|115.145.173.242:6000|node1|/dev/disk/by-id/nvme-SAMSUNG_MZQL2960HCJR-00A07_S64FNE0R906876"   # PM9A3 (나머지와 모델이 다름)
     "2|10.0.0.2:6000|115.145.173.244:6000|node2|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509498"
     "3|10.0.0.3:6000|115.145.173.245:6000|node3|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509501"
-    "4|10.0.0.4:6000|115.145.173.123:6000|nqn.2016-06.io.spdk:node4|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509494"
-    "5|10.0.0.5:6000|115.145.173.124:6000|nqn.2016-06.io.spdk:node5|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509496"
-    "6|10.0.0.6:6000|115.145.173.125:6000|nqn.2016-06.io.spdk:node6|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509484"
+    "4|10.0.0.4:6000|115.145.173.123:6000|nqn.2016-06.io.spdk:node4|/dev/ublkb4"
+    "5|10.0.0.5:6000|115.145.173.124:6000|nqn.2016-06.io.spdk:node5|/dev/ublkb5"
+    "6|10.0.0.6:6000|115.145.173.125:6000|nqn.2016-06.io.spdk:node6|/dev/ublkb6"
     # 2026-11-17 SPDK 타깃(spdk_cache wtcache, 10.0.0.91:4421) 실험: SPDK 는 NQN 이 11자 이상이어야 해서
     #   4/5/6 의 nqn 을 nqn.2016-06.io.spdk:nodeN 으로 바꿨다. 커널 nvmet(4420) 으로 원복하면 nodeN 으로 되돌릴 것.
+    #   storage_dev 도 4/5/6 은 SPDK ublk 장치다 (ublk_start_disk <bdev> <id>, ublk id = node id, 루프백 없음).
+    #   PM983 by-id(…509494/496/484)는 vfio 로 넘어가 커널에 없다. 커널 nvmet 으로 원복하면 by-id 로 되돌릴 것.
     "7|10.0.0.7:6000|115.145.173.126:6000|node7|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509495"     # 빌린 노드
     "8|10.0.0.8:6000|115.145.173.127:6000|node8|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509502"     # 빌린 노드
     "9|10.0.0.9:6000|115.145.173.128:6000|node9|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509486"     # 빌린 노드
