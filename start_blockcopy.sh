@@ -16,6 +16,11 @@ case "$TRANSPORT" in
         ;;
 esac
 
+# tcp-ib 는 스크립트 쪽 구성 이름이다. 바이너리는 rdma|tcp 만 안다 -- 서버는 0.0.0.0 에서 받으므로
+# 이더넷(tcp)과 IPoIB(tcp-ib)의 차이는 노드가 거는 storage_host 주소뿐이다 (env.sh build_cluster).
+BIN_TRANSPORT="$TRANSPORT"
+[[ "$TRANSPORT" == "tcp-ib" ]] && BIN_TRANSPORT="tcp"
+
 LOG="$RAFT_ROOT/raft_blockcopy_server_${TRANSPORT}.log"
 
 # LOCAL_RUN=1 (기본): 실행 파일을 LOCAL_DIR 로 복사해 돌리고 로그도 로컬에 쓴다 (start_node.sh 와 같다).
@@ -34,7 +39,7 @@ cd "$RAFT_ROOT"
 echo "========================================"
 echo "Starting BlockCopy server"
 echo "========================================"
-echo "transport   : $TRANSPORT"
+echo "transport   : $TRANSPORT (binary -transport $BIN_TRANSPORT)"
 echo "listen      : 0.0.0.0:5050"
 echo "nodes       : $NODES"
 echo "devices     : $BC_DEVICES   (NODES 순서 = cluster_index 순서)"
@@ -103,7 +108,7 @@ sudo stdbuf -oL -eL "$BC_BIN" \
     -addr 0.0.0.0:5050 \
     -devices "$BC_DEVICES" \
     -copy-workers 8 \
-    -transport "$TRANSPORT" \
+    -transport "$BIN_TRANSPORT" \
     > "$RUN_LOG" 2>&1 &
 
 PID=$!

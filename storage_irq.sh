@@ -23,12 +23,24 @@
 #
 # 환경변수: IB_DEV (기본 ibp59s0)
 #
+# 노드 호스트(11-16): IFACE=<네트워크 인터페이스> 를 주면 어느 호스트에서든 그 NIC 의 큐 IRQ 를
+#   NIC 의 NUMA 노드로 모은다 (기록은 /var/lib/raftof-irq-<IFACE>). mlx5(IPoIB)는 mlx5_compN,
+#   그 밖의 NIC(igb/ixgbe)는 "<IFACE>-TxRx-N" 벡터가 대상이다.
+#     tcp-ib : IFACE=ibp59s0 ./storage_irq.sh up   (IPoIB 완료 벡터가 NUMA1 까지 흩어져 있다)
+#     tcp    : IFACE=eno0 ./storage_irq.sh status (11-16 실측: igb/ixgbe 큐 IRQ 는 이미 NIC 노드 안)
+#
 set -uo pipefail
 
 IB_DEV="${IB_DEV:-ibp59s0}"
-STATE_DIR="/var/lib/raftof-storage-irq"
+IFACE="${IFACE:-}"
+if [[ -n "$IFACE" ]]; then
+    STATE_DIR="/var/lib/raftof-irq-$IFACE"
+    HOST_ONLY=""
+else
+    STATE_DIR="/var/lib/raftof-storage-irq"
+    HOST_ONLY="eternitystorage"
+fi
 STATE="$STATE_DIR/state"
-HOST_ONLY="eternitystorage"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 as_root() { if [[ $EUID -eq 0 ]]; then "$@"; else sudo "$@"; fi; }
@@ -39,13 +51,20 @@ case "${1:-}" in
 esac
 CMD="$1"
 
-if [[ "$(hostname -s)" != "$HOST_ONLY" ]]; then
-    echo "$(hostname -s): 할 일 없음 ($HOST_ONLY 에서 실행)"
+if [[ -n "$HOST_ONLY" && "$(hostname -s)" != "$HOST_ONLY" ]]; then
+    echo "$(hostname -s): 할 일 없음 ($HOST_ONLY 에서 실행, 노드 호스트는 IFACE=<인터페이스>)"
     exit 0
 fi
 
-DEVDIR="/sys/class/infiniband/$IB_DEV/device"
-[[ -d "$DEVDIR" ]] || die "$IB_DEV 장치가 없다"
+if [[ -n "$IFACE" ]]; then
+    DEVDIR="/sys/class/net/$IFACE/device"
+    [[ -d "$DEVDIR" ]] || die "$IFACE 인터페이스(장치)가 없다"
+    IB_DEV="$IFACE"
+else
+    DEVDIR="/sys/class/infiniband/$IB_DEV/device"
+    [[ -d "$DEVDIR" ]] || die "$IB_DEV 장치가 없다"
+fi
+DRIVER="$(basename "$(readlink -f "$DEVDIR/driver")")"
 PCI="$(basename "$(readlink -f "$DEVDIR")")"
 NODE="$(cat "$DEVDIR/numa_node")"
 [[ "$NODE" =~ ^[0-9]+$ ]] || die "$IB_DEV NUMA 노드를 알 수 없다 ($NODE)"
@@ -62,20 +81,25 @@ expand() {
 NODE_CPUS=($(expand "$(cat /sys/devices/system/node/node$NODE/cpulist)"))
 cpu_node() { ls -d /sys/devices/system/cpu/cpu"$1"/node* 2>/dev/null | head -1 | sed 's/.*node//'; }
 
-# "irq vec" 목록 (vec = mlx5_comp 번호)
+# "irq vec" 목록 (vec = mlx5_comp 번호, 그 밖의 NIC 는 <IFACE>-TxRx-N 의 N)
 comp_irqs() {
-    grep -E "mlx5_comp[0-9]+@pci:$PCI( |$)" /proc/interrupts |
-        sed -E 's/^ *([0-9]+):.*mlx5_comp([0-9]+)@.*/\1 \2/' | sort -k2 -n
+    if [[ "$DRIVER" == mlx5_core ]]; then
+        grep -E "mlx5_comp[0-9]+@pci:$PCI( |$)" /proc/interrupts |
+            sed -E 's/^ *([0-9]+):.*mlx5_comp([0-9]+)@.*/\1 \2/' | sort -k2 -n
+    else
+        grep -E " $IB_DEV-TxRx-[0-9]+$" /proc/interrupts |
+            sed -E "s/^ *([0-9]+):.* $IB_DEV-TxRx-([0-9]+)\$/\1 \2/" | sort -k2 -n
+    fi
 }
 IRQS="$(comp_irqs)"
-[[ -n "$IRQS" ]] || die "$PCI 의 mlx5_comp IRQ 를 찾지 못했다"
+[[ -n "$IRQS" ]] || die "$PCI ($DRIVER) 의 큐 IRQ 를 찾지 못했다"
 
 boot_id() { cat /proc/sys/kernel/random/boot_id; }
 state_get() { [[ -r "$STATE" ]] && sed -n "s/^$1=//p" "$STATE" | tail -1; }
 
 show() {
     local irq vec aff eff n off=0 cnt=0
-    echo "== $IB_DEV ($PCI) NUMA $NODE, 노드 CPU: ${NODE_CPUS[*]}"
+    echo "== $IB_DEV ($PCI, $DRIVER) NUMA $NODE, 노드 CPU: ${NODE_CPUS[*]}"
     echo "   irqbalance: $(systemctl is-active irqbalance 2>/dev/null)"
     if [[ -e "$STATE" ]]; then
         if [[ "$(state_get BOOT)" == "$(boot_id)" ]]; then echo "   상태: up ($(state_get WHEN) 부터)"

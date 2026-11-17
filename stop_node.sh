@@ -3,10 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/env.sh"
-# LOCAL_RUN 으로 띄운 경우: 프로세스가 내려간 뒤 로컬 로그 전체를 저장소 로그 경로로 가져온다
-# (env.sh collect_local_logs). 아직 돌고 있으면 건드리지 않는다.
-_collect_on_exit() { pgrep -f '[r]aft_node' >/dev/null || collect_local_logs node_; }
-trap _collect_on_exit EXIT
+# 노드 로그는 각 호스트의 LOCAL_DIR(/var/tmp/raftof-<user>)에만 남는다. 저장소로 가져오지 않는다 (2026-11-17).
 
 echo "[stop] raft_node"
 

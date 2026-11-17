@@ -454,6 +454,46 @@ C′ 에서도 전체 지연이 A 보다 낮다. 남은 쓰기 손해(256K +79)�
 **미확인:** C′ 가 C 보다 예상 이상(~75) 줄어든 원인, 스토리지 로컬 쓰기와 캐시 읽기의 분리 — [BC-STATS](D23) 또는 C′ 용
 추적(`trace_loop_persist.bt` 는 loop probe 라 C′ 에 못 씀)이 필요하다.
 
+## D25. RDMA vs TCP 비교 구성: 같은 랙 배포 시뮬레이션, TCP 는 이더넷 기준 (2026-11-13 ~ 11-16)
+
+**11-13 이전 "tcp-ib" 결과는 실제로는 1GbE 이더넷 측정이다.** `start_node.sh` 가 구성 선택 뒤
+`select_transport_env "$TRANSPORT"` 를 한 번 더 불렀는데, `TRANSPORT` 는 바이너리 인자(`tcp`)라서
+`tcp-ib` 가 이더넷 주소로 덮어써졌다. braft-tcp 도 `cluster.env` 가 115.145.173.x 라 1GbE 였다.
+`start_blockcopy.sh tcp-ib` 는 `-transport tcp-ib` 를 넘겨 기동에 실패했다. 그리고 TCP 구성이어도
+스토리지(NVMe-oF)는 RDMA(`ports/10 rdma 10.0.0.91:4420`) 그대로였다.
+
+**왜 조용히 틀렸나:** TCP 코드에는 망 구분이 없다 (바이너리는 `-transport rdma|tcp` 만 알고, 서버는
+`INADDR_ANY`, 클라이언트는 목적지 IP 로만 연결 → 커널 라우팅이 NIC 를 고른다). **어느 망으로 가는지는
+주소로만 정해진다.** 그래서 주소 하나가 다른 망에 남아도 에러 없이 다른 망에서 잰다.
+
+**결정:**
+- 구성은 `start_node.sh` 3번째 인자 `TRANSPORT_MODE` 셋 (새 변수 없음):
+  `rdma`(RDMA + NVMe/RDMA, 10.0.0.x) · **`tcp`(TCP 본 실험: 이더넷 115.145.173.x + NVMe/TCP 115.145.173.243:4421)** ·
+  `tcp-ib`(IPoIB 전환 선택지: 10.0.0.x + NVMe/TCP 10.0.0.91:4421). 같은 랙, 지연 에뮬레이션 없음.
+- 대기 정책은 RDMA·TCP 둘 다 스핀 (서버 무한, 클라이언트 2000µs 후 블로킹). TCP 상수
+  `kTcpSpinServeUs`/`kTcpSpinClientUs` 는 `raft_wire_codec.cpp` 에, RDMA 상수 옆에 서로를 가리키는 주석.
+  braft(brpc)는 이벤트 기반 그대로 둔다 (운영급 기준선).
+- TCP 코덱: 커넥션당 64KiB 수신 버퍼(`WireReader`, 요청당 read 5회 → 작은 AE 는 recv 1회, 64KiB 이상
+  body 는 목적지로 직접), 송신은 preamble + body 를 `writev` 한 번 (호출마다 하던 할당·body memcpy 제거).
+  와이어 포맷은 그대로.
+- 가드: `env.sh check_transport` 가 기동 전에 CLUSTER 주소·storage_host 망과, 멤버 볼륨 컨트롤러의
+  NVMe 전송·주소 망을 구성과 대조하고 어긋나면 기동을 거부한다 (`CHECK_TRANSPORT=0` 으로 끔).
+  `start_node.sh` 는 조건을 `raft_node_<id>_<mode>_<transport>.cond` 에 남기고, 스윕은
+  `record_net_cond` 로 `net_cond.txt`(구성, NIC/MTU/속도, IRQ 배치, C-state)를 남긴다.
+
+**한계 (결과에 적을 것):** 1GbE 라 큰 페이로드는 대역폭이 지배한다(4MiB ≈ 34ms 직렬화). 이더넷은 /home NFS·
+캠퍼스 트래픽과 같은 링크다(`LOCAL_RUN=1` 로 실행). 대기 방식은 braft 만 다르다. RoCE 혼잡(PFC/ECN)은 재현 불가.
+- **"같은 대기 정책"은 1GbE 큰 페이로드에서 글자 그대로는 아니다.** 1MiB 이상은 선로에만 8~34ms 라 클라이언트의
+  2000µs 스핀 예산이 늘 끝나고 블로킹 recv 로 내려간다(RDMA 는 그 전에 완료가 온다). 깨어남 비용은 전송 시간에 비해
+  무시할 만하다.
+- **normal 모드 4MiB:** 리더 업링크에 팔로워 2개 × 4MiB 가 실려 요청당 ~70~100ms 다. 하트비트는 피어별 `call_mu` 뒤에
+  줄을 서지만 선거 타임아웃(하트비트 300ms × 20~30 = 6~9s)보다 훨씬 짧다.
+- NVMe/TCP 를 이더넷에 열면 캠퍼스망에 노출된다 (node subsystem 은 `attr_allow_any_host=1`). `nvmet_tcp_port.sh up` 이
+  iptables 로 4421 을 멤버 노드 주소에만 연다.
+- I/O 스레드 고정: `probe_io_queues.sh` 의 큐 판정은 스토리지 mlx5_comp IRQ 기준이라 NVMe/TCP 큐에는 못 쓴다. tcp 볼륨은
+  재지 않고 NIC NUMA 노드 CPU 전체로 고정한다 (스토리지 이더넷 IRQ 가 모두 NUMA0 이라 큐 간 빠르고 느린 구분이 없다).
+- NVMe 큐 수는 전 호스트 `-i 8`(queue_count 9, 11-16 확인). `nvmeof_switch.sh` 기본값도 8 이다.
+
 ## U. 미해결 — 리팩토링 중 마주치면 여기를 볼 것
 
 | # | 항목 | 위치 | 상태 |

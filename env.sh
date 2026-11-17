@@ -23,9 +23,11 @@ POOL=(
     "1|10.0.0.1:6000|115.145.173.242:6000|node1|/dev/disk/by-id/nvme-SAMSUNG_MZQL2960HCJR-00A07_S64FNE0R906876"   # PM9A3 (나머지와 모델이 다름)
     "2|10.0.0.2:6000|115.145.173.244:6000|node2|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509498"
     "3|10.0.0.3:6000|115.145.173.245:6000|node3|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509501"
-    "4|10.0.0.4:6000|115.145.173.123:6000|node4|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509494"
-    "5|10.0.0.5:6000|115.145.173.124:6000|node5|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509496"
-    "6|10.0.0.6:6000|115.145.173.125:6000|node6|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509484"
+    "4|10.0.0.4:6000|115.145.173.123:6000|nqn.2016-06.io.spdk:node4|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509494"
+    "5|10.0.0.5:6000|115.145.173.124:6000|nqn.2016-06.io.spdk:node5|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509496"
+    "6|10.0.0.6:6000|115.145.173.125:6000|nqn.2016-06.io.spdk:node6|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509484"
+    # 2026-11-17 SPDK 타깃(spdk_cache wtcache, 10.0.0.91:4421) 실험: SPDK 는 NQN 이 11자 이상이어야 해서
+    #   4/5/6 의 nqn 을 nqn.2016-06.io.spdk:nodeN 으로 바꿨다. 커널 nvmet(4420) 으로 원복하면 nodeN 으로 되돌릴 것.
     "7|10.0.0.7:6000|115.145.173.126:6000|node7|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509495"     # 빌린 노드
     "8|10.0.0.8:6000|115.145.173.127:6000|node8|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509502"     # 빌린 노드
     "9|10.0.0.9:6000|115.145.173.128:6000|node9|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509486"     # 빌린 노드
@@ -191,19 +193,191 @@ build_cluster() {
 }
 
 # record_io_pin <outfile>  ->  NODES 의 각 노드가 어떤 CPU 로 persist 스레드를 고정했는지 기록
-#   (start_node.sh IO_PIN / raft_node -io-cpus). 각 노드의 가장 최근 시작 로그($RAFT_ROOT 는 NFS
+#   (start_node.sh IO_PIN / raft_node -io-cpus). 각 노드의 가장 최근 .cond 에 붙은 기동 배너($RAFT_ROOT 는 NFS
 #   라 모든 노드 로그가 보인다)에서 뽑는다. 스윕 결과의 LPersist/StorageIO 는 고정 여부에 따라
 #   1MiB 기준 ~75us 달라지므로 결과와 같이 남긴다.
 record_io_pin() {
     local out="$1" id lg line push
     : > "$out"
     for id in $NODES; do
-        lg="$(ls -t "$RAFT_ROOT"/raft_node_"${id}"_*.log 2>/dev/null | head -1)"
-        if [[ -z "$lg" ]]; then echo "node $id: (시작 로그 없음)" >> "$out"; continue; fi
+        lg="$(ls -t "$RAFT_ROOT"/raft_node_"${id}"_*.cond 2>/dev/null | head -1)"   # 배너는 .cond 에 붙어 있다
+        if [[ -z "$lg" ]]; then echo "node $id: (시작 기록 없음)" >> "$out"; continue; fi
         line="$(grep -m1 '^  io cpus' "$lg" | sed 's/^  io cpus *: //')"
         push="$(grep '^  push device' "$lg" | grep -oE '^  push device *: [0-9]+|cpus [^)]*' | sed 's/^  push device *: /push /' | paste -sd' ' -)"
         echo "node $id: io cpus ${line:-(줄 없음: -io-cpus 이전 바이너리)}${push:+ | $push} [${lg##*/}]" >> "$out"
     done
+}
+
+# ---------------------------------------------------------------------------
+# 전송 구성 확인 (11-13/11-16, 배포 시뮬레이션)
+#   TCP 코드는 망을 모른다 -- 어느 NIC 로 가는지는 **주소로만** 정해진다. 그래서 주소 하나가
+#   다른 망으로 남으면 라벨과 실제 측정이 조용히 어긋난다 (11-13 이전 tcp-ib 결과가 실제로는
+#   1GbE 였다). 기동 전에 구성(TRANSPORT_MODE)과 실제 주소·NVMe 전송을 대조한다.
+#
+#   구성     raft/blockcopy 주소   NVMe-oF
+#   rdma     10.0.0.x  (ipoib)     rdma, 10.0.0.x
+#   tcp      115.145.173.x (eth)   tcp,  115.145.173.x   <- TCP 본 실험 (이더넷)
+#   tcp-ib   10.0.0.x  (ipoib)     tcp,  10.0.0.x        <- IPoIB 전환 선택지
+# ---------------------------------------------------------------------------
+
+# net_prefix <ipoib|eth>  ->  그 망의 주소 앞부분
+net_prefix() {
+    case "$1" in
+        ipoib) echo "10.0.0." ;;
+        eth)   echo "115.145.173." ;;
+        *) echo "net_prefix: ipoib|eth" >&2; return 1 ;;
+    esac
+}
+
+# mode_expect <rdma|tcp|tcp-ib>  ->  "<주소 망> <NVMe 전송> <NVMe 망>"
+mode_expect() {
+    case "$1" in
+        rdma)   echo "ipoib rdma ipoib" ;;
+        tcp)    echo "eth tcp eth" ;;
+        tcp-ib) echo "ipoib tcp ipoib" ;;
+        *) echo "mode_expect: rdma|tcp|tcp-ib" >&2; return 1 ;;
+    esac
+}
+
+# nvme_paths_for_nqn <nqn>  ->  그 subsystem 의 컨트롤러마다 "<ctrl> <transport> <traddr>:<trsvcid>" 한 줄
+nvme_paths_for_nqn() {
+    local nqn="$1" s c name addr ta ts
+    for s in /sys/class/nvme-subsystem/nvme-subsys*; do
+        [[ -r "$s/subsysnqn" && "$(<"$s/subsysnqn")" == "$nqn" ]] || continue
+        for c in "$s"/nvme[0-9]*; do
+            name="${c##*/}"
+            [[ "$name" =~ ^nvme[0-9]+$ ]] || continue
+            addr="$(cat "/sys/class/nvme/$name/address" 2>/dev/null)"
+            ta="$(sed -n 's/.*traddr=\([^,]*\).*/\1/p' <<< "$addr")"
+            ts="$(sed -n 's/.*trsvcid=\([^,]*\).*/\1/p' <<< "$addr")"
+            echo "$name $(cat "/sys/class/nvme/$name/transport" 2>/dev/null) ${ta:-?}:${ts:-?}"
+        done
+    done
+}
+
+# nvme_desc_for_id <id>  ->  배너용 한 줄 ("tcp 115.145.173.243:4421 (nvme3)" 등, 여럿이면 ' / ')
+nvme_desc_for_id() {
+    local out
+    out="$(nvme_paths_for_nqn "$(_pool_field "$1" 3)" | awk '{printf "%s%s %s (%s)", (NR>1?" / ":""), $2, $3, $1}')"
+    echo "${out:-(attach 안 됨)}"
+}
+
+# check_transport <rdma|tcp|tcp-ib>
+#   1) CLUSTER 가 있으면 각 항목의 raft 주소와 storage_host 가 기대 망인지
+#   2) NODES 의 볼륨 중 이 호스트에 붙은 것의 모든 컨트롤러가 기대 전송·망인지
+#      (자기 볼륨만 필수: MY_ID 가 있으면 그 볼륨이 붙어 있어야 한다)
+#   하나라도 어긋나면 이유를 찍고 1. CHECK_TRANSPORT=0 이면 건너뛴다 (경고만).
+check_transport() {
+    local mode="$1" net nvt nvnet pfx nvpfx bad=0 e id addr sh nqn line ctrl tr ta found
+    if [[ "${CHECK_TRANSPORT:-1}" == "0" ]]; then
+        echo "WARN: CHECK_TRANSPORT=0 -- 전송 구성 확인을 건너뛴다" >&2
+        return 0
+    fi
+    read -r net nvt nvnet <<< "$(mode_expect "$mode")" || return 1
+    pfx="$(net_prefix "$net")"; nvpfx="$(net_prefix "$nvnet")"
+
+    if [[ -n "${CLUSTER:-}" ]]; then
+        for e in ${CLUSTER//,/ }; do
+            IFS='@' read -r id addr _ sh <<< "$e"
+            if [[ "$addr" != "$pfx"* ]]; then
+                echo "ERROR: [$mode] node $id raft 주소 $addr 가 $net($pfx*) 가 아니다" >&2; bad=1
+            fi
+            if [[ -n "$sh" && "$sh" != "$pfx"* ]]; then
+                echo "ERROR: [$mode] node $id storage_host $sh 가 $net($pfx*) 가 아니다" >&2; bad=1
+            fi
+        done
+    fi
+
+    for id in $NODES; do
+        nqn="$(_pool_field "$id" 3)" || continue
+        found=0
+        while read -r ctrl tr ta; do
+            [[ -n "$ctrl" ]] || continue
+            found=1
+            if [[ "$tr" != "$nvt" || "$ta" != "$nvpfx"* ]]; then
+                echo "ERROR: [$mode] node $id 볼륨($nqn) $ctrl 가 $tr $ta 다 -- 기대: $nvt $nvpfx* (nvmeof_switch.sh)" >&2
+                bad=1
+            fi
+        done < <(nvme_paths_for_nqn "$nqn")
+        if [[ $found -eq 0 && "${MY_ID:-}" == "$id" ]]; then
+            echo "ERROR: [$mode] 자기 볼륨($nqn)이 이 호스트에 붙어 있지 않다" >&2; bad=1
+        fi
+    done
+
+    if [[ $bad -ne 0 ]]; then
+        echo "       구성 '$mode' 는 주소 $net, NVMe $nvt/$nvnet 이어야 한다. 의도한 것이면 CHECK_TRANSPORT=0" >&2
+        return 1
+    fi
+    return 0
+}
+
+# braft_tools_dir <eth|ipoib>  ->  braft 도구 디렉터리 경로
+#   eth   : 원본 (/home/jongc/braft/braft_block_tools, cluster.env 의 POOL 이 1GbE 주소)
+#   ipoib : 원본의 스크립트와 cluster.env 를 $RAFT_ROOT/results/braft_tools_ipoib 로 복사하고
+#           POOL 주소만 이 파일 POOL 의 IPoIB 주소로 바꾼다 (원본은 root 소유라 고치지 않는다).
+#           저장소(NFS) 안이라 노드와 클라이언트 호스트가 같은 사본을 본다. 부를 때마다 다시 만든다.
+BRAFT_TOOLS_SRC="${BRAFT_TOOLS_SRC:-/home/jongc/braft/braft_block_tools}"
+braft_tools_dir() {
+    local dst="$RAFT_ROOT/results/braft_tools_ipoib" f e id ip sedx=()
+    case "$1" in
+        eth) echo "$BRAFT_TOOLS_SRC"; return 0 ;;
+        ipoib) ;;
+        *) echo "braft_tools_dir: eth|ipoib" >&2; return 1 ;;
+    esac
+    mkdir -p "$dst" || return 1
+    # 내용이 다를 때만 바꾼다 (다른 호스트가 이 사본으로 run_block_node.sh 를 돌리는 중일 수 있다 -- NFS)
+    for f in "$BRAFT_TOOLS_SRC"/*.sh; do
+        cmp -s "$f" "$dst/${f##*/}" && continue
+        cp "$f" "$dst/${f##*/}.tmp.$$" && mv -f "$dst/${f##*/}.tmp.$$" "$dst/${f##*/}" || return 1
+    done
+    for e in "${POOL[@]}"; do
+        e="${e%%#*}"
+        IFS='|' read -r id ip _ <<< "$e"
+        ip="${ip%:*}"
+        sedx+=(-e "s/^\([[:space:]]*\"\)${id}|[0-9.]*\"/\1${id}|${ip}\"/")
+    done
+    {
+        echo "# 자동 생성 (raftof_clean env.sh braft_tools_dir ipoib): $BRAFT_TOOLS_SRC/cluster.env 의 POOL 을 IPoIB 로"
+        sed "${sedx[@]}" "$BRAFT_TOOLS_SRC/cluster.env"
+    } > "$dst/cluster.env.tmp.$$" || return 1
+    if cmp -s "$dst/cluster.env.tmp.$$" "$dst/cluster.env"; then rm -f "$dst/cluster.env.tmp.$$"
+    else mv -f "$dst/cluster.env.tmp.$$" "$dst/cluster.env" || return 1; fi
+    if grep -qE '^[[:space:]]*"[0-9]+\|115\.' "$dst/cluster.env"; then
+        echo "braft_tools_dir: $dst/cluster.env 에 이더넷 주소가 남았다" >&2
+        return 1
+    fi
+    echo "$dst"
+}
+
+# record_net_cond <outfile>  ->  측정 조건 스냅샷 (record_io_pin 옆에 둔다)
+#   NODES 각 노드의 최근 기동 조건(start_node.sh 가 쓰는 raft_node_<id>_*.cond: 전송 구성, 주소, NVMe, sha)과, ssh 로 읽은 호스트별
+#   NIC·IRQ·C-state. ssh 가 안 되면 그 줄에 (ssh 실패)만 남긴다 (REC_SSH=0 이면 ssh 생략).
+record_net_cond() {
+    local out="$1" id lg h
+    {
+        echo "# record_net_cond $(date '+%F %T') from $(hostname -s)  TRANSPORT=${TRANSPORT:-?} NODES=$NODES"
+        for id in $NODES; do
+            lg="$(ls -t "$RAFT_ROOT"/raft_node_"${id}"_*.cond 2>/dev/null | head -1)"
+            echo "## node $id  [${lg##*/}]"
+            [[ -n "$lg" ]] && sed 's/^/  /' "$lg"
+            [[ "${REC_SSH:-1}" == "1" ]] || continue
+            h="$(host_for_id "$id")"
+            ssh -o BatchMode=yes -o ConnectTimeout=3 "$h" 'bash -s' 2>/dev/null <<'EOS' | sed 's/^/  /' || echo "  (ssh $h 실패)"
+for i in $(ls /sys/class/net); do
+    a="$(ip -o -4 addr show dev "$i" 2>/dev/null | awk '{print $4}' | head -1)"
+    case "$a" in 10.0.0.*|115.145.173.*) ;; *) continue ;; esac
+    echo "if $i $a mtu=$(cat /sys/class/net/$i/mtu) speed=$(cat /sys/class/net/$i/speed 2>/dev/null)Mb mode=$(cat /sys/class/net/$i/mode 2>/dev/null || echo -) numa=$(cat /sys/class/net/$i/device/numa_node 2>/dev/null)"
+    drv="$(basename "$(readlink /sys/class/net/$i/device/driver 2>/dev/null)")"
+    irqs="$(ls /sys/class/net/$i/device/msi_irqs 2>/dev/null | head -64)"
+    aff=""
+    for q in $irqs; do aff+="$q:$(cat /proc/irq/$q/smp_affinity_list 2>/dev/null) "; done
+    echo "   driver=$drv irq(affinity)=${aff:-?}"
+done
+echo "cstate $(for s in /sys/devices/system/cpu/cpu0/cpuidle/state*; do printf '%s=%s ' "$(cat $s/name)" "$(cat $s/disable)"; done)"
+echo "governor $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null) no_turbo=$(cat /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null)"
+EOS
+        done
+    } > "$out"
 }
 
 # ---------------------------------------------------------------------------

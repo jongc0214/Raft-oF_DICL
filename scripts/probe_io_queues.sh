@@ -6,6 +6,8 @@
 #   ./scripts/probe_io_queues.sh 4 6        node 4, 6 볼륨 (push 대상 확인용)
 #   ALL=1 ./scripts/probe_io_queues.sh      NODES(TOPO) 의 모든 멤버 볼륨
 #
+# NVMe/TCP 로 붙은 볼륨(tcp / tcp-ib 구성)은 재지 않고 NIC NUMA 노드 CPU 전체를 기록한다 (아래 tcp 분기).
+#
 # 왜: NVMe-oF 쓰기는 보내는 CPU 의 큐로 나가고, 큐마다 스토리지의 nvmet-rdma 큐가 따로 있다.
 #   그 큐의 완료 IRQ 가 스토리지 IB 카드와 다른 NUMA 노드의 CPU 에 걸려 있으면 1MiB 쓰기가
 #   ~75us 느리다 (2026-11-08, eternity4/5/6 fio 로 확인). 배치는 연결할 때 정해지고 재연결하면 바뀐다.
@@ -117,6 +119,37 @@ for id in $IDS; do
     done
     if [[ -z "$mqdir" && -d "/sys/block/${dev##*/}/mq" ]]; then mqdir="/sys/block/${dev##*/}/mq"; fi
     [[ -n "$mqdir" ]] || { echo "ERROR: node $id 의 mq 디렉터리를 찾지 못했다 ($ctrl)"; exit 1; }
+
+    # NVMe/TCP (11-16, tcp / tcp-ib 구성): 판정 기준이 스토리지 mlx5_comp IRQ 라 tcp 큐에는 쓸 수 없다.
+    #   스토리지에서 tcp 큐의 수신 처리는 NIC IRQ(이더넷 eno1 ixgbe, IPoIB 는 mlx5_comp) CPU 에서 도는데,
+    #   그 IRQ 는 모두 NIC 노드(NUMA0) 안이다 (11-16 실측: eno1 0-7,16-23 / ibp59s0 은 storage_irq.sh up).
+    #   큐마다 빠르고 느린 구분이 없으므로 재지 않고, 타깃으로 가는 NIC 의 NUMA 노드 CPU 전체를 기록한다
+    #   (RDMA 의 "빠른 큐가 없으면 IB 노드 CPU 전체" 규칙과 같은 자리). 재연결 감지용 CTRL/CNTLID 는 그대로.
+    if [[ "$(cat "/sys/class/nvme/$ctrl/transport" 2>/dev/null)" == tcp ]]; then
+        traddr="$(sed -n 's/.*traddr=\([^,]*\).*/\1/p' "/sys/class/nvme/$ctrl/address")"
+        nic="$(ip -o route get "$traddr" 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p')"
+        nnode="$(cat "/sys/class/net/$nic/device/numa_node" 2>/dev/null || echo -1)"
+        use=""
+        if [[ "$nnode" =~ ^[0-9]+$ ]]; then
+            for r in $(tr ',' ' ' < "/sys/devices/system/node/node$nnode/cpulist"); do
+                if [[ "$r" == *-* ]]; then
+                    for ((c = ${r%-*}; c <= ${r#*-}; c++)); do use+="${use:+,}$c"; done
+                else
+                    use+="${use:+,}$r"
+                fi
+            done
+        fi
+        echo
+        echo "== node $id ($nqn) $dev ctrl=$ctrl cntlid=$cntlid  tcp $traddr via $nic (NUMA $nnode)"
+        echo "  -> NVMe/TCP: 큐 판정 없음, NIC 노드 CPU 로 고정: ${use:-(NIC NUMA 를 모름, 비움)}"
+        {
+            echo "IOQ_${id}_CTRL=$ctrl"
+            echo "IOQ_${id}_CNTLID=$cntlid"
+            echo "IOQ_${id}_CPUS=\"$use\""
+            echo "IOQ_${id}_TABLE=\"tcp:$nic:numa$nnode\""
+        } >> "$TMP"
+        continue
+    fi
 
     echo
     echo "== node $id ($nqn) $dev ctrl=$ctrl cntlid=$cntlid  (host IB NUMA $IB_NODE)"

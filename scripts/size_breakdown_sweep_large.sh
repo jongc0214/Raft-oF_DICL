@@ -13,7 +13,7 @@
 # 사용법:
 #   ./scripts/size_breakdown_sweep.sh rdma|tcp [출력디렉터리]
 #
-#   rdma|tcp  클라이언트 전송. **노드를 띄운 -transport 와 같아야 한다**
+#   rdma|tcp|tcp-ib  구성 이름. **노드를 띄운 start_node.sh 3번째 인자와 같아야 한다**
 #
 # 환경변수: SIZES N REPS ADDRS TIMEOUT_S BIN RING_BYTES WARMUP ... 는
 # apply_latency_sweep.sh 로 그대로 넘어간다 (그 머리 주석 참고). 여기서 바꾸는
@@ -57,19 +57,24 @@ set -uo pipefail
 
 TRANSPORT="${1:-}"
 case "$TRANSPORT" in
-    rdma|tcp) ;;
+    rdma|tcp|tcp-ib) ;;
     *)
-        printf 'usage: %s rdma|tcp [출력디렉터리]\n' "$0" >&2
+        printf 'usage: %s rdma|tcp|tcp-ib [출력디렉터리]\n' "$0" >&2
         exit 2
         ;;
 esac
+
+# tcp = 이더넷, rdma / tcp-ib = IPoIB (start_node.sh 3번째 인자와 같게, DECISIONS.md D25).
+# 클라이언트 바이너리는 rdma|tcp 만 안다 -> tcp-ib 는 -transport tcp + IPoIB 주소.
+case "$TRANSPORT" in tcp) ADDR_NET=eth ;; *) ADDR_NET=ipoib ;; esac
+CLIENT_TRANSPORT="$TRANSPORT"; [ "$TRANSPORT" = "tcp-ib" ] && CLIENT_TRANSPORT=tcp
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 OUTDIR="${2:-$REPO/csv/lat_breakdown_${TRANSPORT}_$(date +%m%d-%H%M%S)}"
 
 export TRANSPORT
-# 기본값: env.sh 의 NODES/TOPO 로 만든 IPoIB 주소 (노드를 띄운 것과 같은 TOPO 를 줄 것)
-export ADDRS="${ADDRS:-$(source "$REPO/env.sh" >/dev/null 2>&1 && build_cluster ipoib >/dev/null 2>&1 && echo "$ADDRS")}"
+# 기본값: env.sh 의 NODES/TOPO 로 만든 그 망의 주소 (노드를 띄운 것과 같은 TOPO 를 줄 것)
+export ADDRS="${ADDRS:-$(source "$REPO/env.sh" >/dev/null 2>&1 && build_cluster "$ADDR_NET" >/dev/null 2>&1 && echo "$ADDRS")}"
 export SIZES="${SIZES:-524288}"
 export ENTRY_SIZES=1   # SIZES 는 헤더 포함 엔트리 크기
 export REPS="${REPS:-3}"

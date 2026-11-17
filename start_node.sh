@@ -49,6 +49,11 @@ case "$TRANSPORT_MODE" in
         TRANSPORT="tcp"
         select_transport_env tcp
         ;;
+    *)
+        echo "invalid transport: $TRANSPORT_MODE"
+        echo "valid: rdma, tcp (이더넷, TCP 본 실험), tcp-ib (IPoIB)"
+        exit 1
+        ;;
 esac
 
 # push 모드: 다른 멤버 볼륨마다 이 호스트의 장치를 nqn 으로 찾아 id=dev 로 넘긴다.
@@ -70,15 +75,19 @@ if [[ "$MODE" == "push" ]]; then
     PUSH_ARGS+=(-push-devices "$PUSH_DEVICES")
 fi
 
-select_transport_env "$TRANSPORT"
+# (11-13) 예전에는 여기서 select_transport_env "$TRANSPORT" 를 한 번 더 불렀다. TRANSPORT 는
+# 바이너리 인자(rdma|tcp)라서 tcp-ib 가 tcp(이더넷 주소)로 덮어써졌다 -> 11-13 이전 tcp-ib 는 1GbE 측정.
+
+# 구성(TRANSPORT_MODE)과 실제 주소·NVMe 전송이 맞는지 기동 전에 확인한다 (env.sh check_transport)
+MY_ID="$ID" check_transport "$TRANSPORT_MODE" || exit 1
 
 META_DIR="$(metadata_dir_for_id "$ID")"
 DEVICE="$(device_for_id "$ID")" || { echo "ERROR: node $ID 자기 볼륨을 찾지 못했다"; exit 1; }
 
 LOG="$RAFT_ROOT/raft_node_${ID}_${MODE}_${TRANSPORT_MODE}.log"
 
-# LOCAL_RUN=1 (기본): 실행 파일을 LOCAL_DIR(/var/tmp/raftof-<user>)로 복사해 돌리고 로그도 로컬에 쓴다.
-#   저장소($LOG)에는 기동 배너만 두고, stop_node.sh 가 전체 로그로 덮어쓴다 (env.sh 로컬 실행 참고).
+# LOCAL_RUN=1 (기본): 실행 파일을 LOCAL_DIR(/var/tmp/raftof-<user>)로 복사해 돌리고 로그도 로컬에만 쓴다.
+#   저장소에는 *.log 를 남기지 않는다 (2026-11-17). 스윕이 읽는 기동 배너는 ${LOG%.log}.cond 에 붙인다.
 #   0 이면 예전처럼 build/raft_node 를 NFS 에서 돌리고 $LOG 에 바로 쓴다.
 NODE_BIN="$RAFT_ROOT/build/raft_node"
 RUN_LOG="$LOG"
@@ -237,11 +246,13 @@ echo "Starting Raft node"
 echo "========================================"
 echo "id          : $ID"
 echo "mode        : $MODE"
-echo "transport   : $TRANSPORT"
+echo "transport   : $TRANSPORT_MODE (binary -transport $TRANSPORT)"
 echo "metadata    : $META_DIR"
 echo "device      : $DEVICE"
 echo "push-devices: ${PUSH_DEVICES:-(none)}"
 echo "cluster     : $CLUSTER"
+echo "storage rpc : ${CLUSTER##*@}"
+echo "nvme        : $(nvme_desc_for_id "$ID")"
 echo "ring-pages  : $RING_PAGES"
 echo "precondition: $RING_PRECONDITION"
 echo "heartbeat   : $HEARTBEAT_MS ms"
@@ -253,7 +264,7 @@ if [[ "$RUN_LOG" == "$LOG" ]]; then
     echo "log         : $LOG"
 else
     echo "binary      : $NODE_BIN (sha $BIN_SHA)"
-    echo "log         : $RUN_LOG (로컬; 저장소 $LOG 에는 배너만, stop_node.sh 가 전체를 가져온다)"
+    echo "log         : $RUN_LOG (로컬에만. 저장소에는 배너를 ${LOG%.log}.cond 에 붙인다)"
 fi
 echo "========================================"
 
@@ -314,22 +325,28 @@ sudo "${LIB_PREFIX[@]}" "${NUMA_PREFIX[@]}" stdbuf -oL -eL "$NODE_BIN" \
 # -gc-max-bytes "$MAX_GC_BYTES" \
 PID=$!
 
-if [[ "$RUN_LOG" != "$LOG" ]]; then
-    printf 'LLOG=%q\nRLOG=%q\nSHA=%q\n' "$RUN_LOG" "$LOG" "$BIN_SHA" > "$LOCAL_DIR/running_node_${ID}.env"
-fi
+# 측정 조건 (env.sh record_net_cond 가 읽는다): 스크립트가 고른 전송 구성. 바이너리 로그와 따로 둔다
+{
+    echo "host        : $(hostname -s)"
+    echo "transport   : $TRANSPORT_MODE (binary -transport $TRANSPORT)"
+    echo "cluster     : $CLUSTER"
+    echo "storage rpc : ${CLUSTER##*@}"
+    echo "nvme        : $(nvme_desc_for_id "$ID")"
+    echo "binary sha  : $BIN_SHA"
+} > "${LOG%.log}.cond"
 
 sleep 1
 
 if ! ps -p "$PID" >/dev/null 2>&1; then
     echo "ERROR: raft_node exited during startup"
     tail -100 "$RUN_LOG"
-    [[ "$RUN_LOG" != "$LOG" ]] && collect_local_logs "node_${ID}"
     exit 1
 fi
 
-# 스윕의 record_io_pin 이 읽는 기동 배너(io cpus / push device)를 저장소 로그 경로에 둔다
+# 스윕의 record_io_pin 이 읽는 기동 배너(io cpus / push device)를 저장소의 .cond 에 붙인다
 if [[ "$RUN_LOG" != "$LOG" ]]; then
-    publish_banner "$RUN_LOG" "$LOG" "$BIN_SHA" '^  term/tail'
+    publish_banner "$RUN_LOG" "$LOCAL_DIR/banner_node_${ID}" "$BIN_SHA" '^  term/tail'
+    cat "$LOCAL_DIR/banner_node_${ID}" >> "${LOG%.log}.cond"
 fi
 
 echo

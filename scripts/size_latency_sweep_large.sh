@@ -27,7 +27,7 @@
 # 사용법:
 #   ./scripts/size_latency_sweep.sh rdma|tcp [출력디렉터리]
 #
-#   rdma|tcp  클라이언트 전송. **노드를 띄운 -transport 와 같아야 한다**
+#   rdma|tcp|tcp-ib  구성 이름. **노드를 띄운 start_node.sh 3번째 인자와 같아야 한다**
 #             (다르면 commit-index preflight 에서 붙지 못하고 끝난다)
 #
 # 환경변수:
@@ -95,19 +95,24 @@ set -uo pipefail
 
 TRANSPORT="${1:-}"
 case "$TRANSPORT" in
-    rdma|tcp) ;;
+    rdma|tcp|tcp-ib) ;;
     *)
-        printf 'usage: %s rdma|tcp [출력디렉터리]\n' "$0" >&2
+        printf 'usage: %s rdma|tcp|tcp-ib [출력디렉터리]\n' "$0" >&2
         exit 2
         ;;
 esac
+
+# tcp = 이더넷, rdma / tcp-ib = IPoIB (start_node.sh 3번째 인자와 같게, DECISIONS.md D25).
+# 클라이언트 바이너리는 rdma|tcp 만 안다 -> tcp-ib 는 -transport tcp + IPoIB 주소.
+case "$TRANSPORT" in tcp) ADDR_NET=eth ;; *) ADDR_NET=ipoib ;; esac
+CLIENT_TRANSPORT="$TRANSPORT"; [ "$TRANSPORT" = "tcp-ib" ] && CLIENT_TRANSPORT=tcp
 
 OUTDIR="${2:-$HOME/raftof_clean/csv/lat_size_${TRANSPORT}_$(date +%m%d-%H%M%S)}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="${BIN:-$REPO/build}"
 
-# 기본값: env.sh 의 NODES/TOPO 로 만든 IPoIB 주소 (노드를 띄운 것과 같은 TOPO 를 줄 것)
-ADDRS="${ADDRS:-$(source "$REPO/env.sh" >/dev/null 2>&1 && build_cluster ipoib >/dev/null 2>&1 && echo "$ADDRS")}"
+# 기본값: env.sh 의 NODES/TOPO 로 만든 그 망의 주소 (노드를 띄운 것과 같은 TOPO 를 줄 것)
+ADDRS="${ADDRS:-$(source "$REPO/env.sh" >/dev/null 2>&1 && build_cluster "$ADDR_NET" >/dev/null 2>&1 && echo "$ADDRS")}"
 SIZES="${SIZES:-4194304}"
 # 엔트리 헤더 크기 (core/include/raft_constants.h ENTRY_META_SIZE). SIZES 는
 # 이 헤더를 포함한 엔트리 크기이고, 클라이언트 -size 에는 이만큼 뺀 값을 넘긴다
@@ -201,7 +206,7 @@ fi
 # ---------------------------------------------------------------------------
 log "preflight: commit-index"
 naddrs=$(printf '%s\n' "$ADDRS" | tr ',' '\n' | grep -c '[^[:space:]]')
-"$CLIENT" -addrs "$ADDRS" -op commit-index -transport "$TRANSPORT" \
+"$CLIENT" -addrs "$ADDRS" -op commit-index -transport "$CLIENT_TRANSPORT" \
     > "$OUTDIR/preflight.log" 2>&1
 rc=$?
 sed 's/^/       /' "$OUTDIR/preflight.log"
@@ -221,7 +226,7 @@ ok "$nreach/$naddrs nodes answered"
 if [ "$WARMUP" != "0" ]; then
     log "warmup: $WARMUP_N × ${WARMUP_SIZE}B entry (cmd ${WARMUP_CMD}B, ring=${RING_BYTES}B, ~1.2 laps) -- discarded"
     "$CLIENT" -addrs "$ADDRS" -op apply -n "$WARMUP_N" -size "$WARMUP_CMD" \
-        -batch "$WARMUP_BATCH" -timeout-s "$TIMEOUT_S" -transport "$TRANSPORT" \
+        -batch "$WARMUP_BATCH" -timeout-s "$TIMEOUT_S" -transport "$CLIENT_TRANSPORT" \
         > "$OUTDIR/warmup.log" 2>&1
     if [ $? -ne 0 ]; then
         fail "warmup failed -- see $OUTDIR/warmup.log"
@@ -248,7 +253,7 @@ run_point() {
     local cmd=$(( size - ENTRY_META ))   # 헤더 포함 엔트리 크기 -> 명령 크기
 
     "$CLIENT" -addrs "$ADDRS" -op apply -n "$N" -size "$cmd" \
-        -batch 1 -timeout-s "$TIMEOUT_S" -transport "$TRANSPORT" \
+        -batch 1 -timeout-s "$TIMEOUT_S" -transport "$CLIENT_TRANSPORT" \
         > "$plog" 2>&1
     local rc=$?
     if [ $rc -ne 0 ]; then

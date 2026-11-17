@@ -24,10 +24,11 @@
 #
 #   rdma|tcp  **기록용 라벨**이다 -- 노드를 띄운 RPC_TRANSPORT(run_block_node.sh)와
 #             같게 줄 것. 노드 사이 raft RPC 의 전송을 뜻한다. 클라이언트는 이
-#             값과 무관하게 brpc 기본 채널(TCP, cluster.env 의 1GbE 주소)로 리더에
+#             값과 무관하게 brpc 기본 채널(TCP, cluster.env 의 주소, NET 이 정한다)로 리더에
 #             붙는다 -- 아래 "읽기 전에 알 것" (1)
 #
 # 환경변수:
+#   NET          eth (기본) | ipoib -- 노드를 띄운 start_braft.sh 의 NET 과 같게
 #   BRAFT_TOOLS  braft_block_tools 디렉터리 (기본 /home/jongc/braft/braft_block_tools).
 #                cluster.env 에서 CONF / PORT / BLOCK_BUILD_DIR 를 가져온다
 #   NODES / TOPO cluster.env 로 그대로 넘어간다 (기본 4 5 6). 노드와 같아야 한다
@@ -84,7 +85,9 @@ esac
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 OUTDIR="${2:-$REPO/csv/braft_lat_size_${TRANSPORT}_$(date +%m%d-%H%M%S)}"
 
-BRAFT_TOOLS="${BRAFT_TOOLS:-/home/jongc/braft/braft_block_tools}"
+# NET=eth(기본)|ipoib: start_braft.sh 와 같게. ipoib 면 env.sh braft_tools_dir 의 사본(POOL 만 10.0.0.x)을 쓴다
+NET="${NET:-eth}"
+BRAFT_TOOLS="${BRAFT_TOOLS:-$(source "$REPO/env.sh" >/dev/null 2>&1; braft_tools_dir "$NET")}"
 if [ ! -r "$BRAFT_TOOLS/cluster.env" ]; then
     printf '  [FAIL] %s/cluster.env 를 읽을 수 없다 (BRAFT_TOOLS 확인)\n' "$BRAFT_TOOLS" >&2
     exit 1

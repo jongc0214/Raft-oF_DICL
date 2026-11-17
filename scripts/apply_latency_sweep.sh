@@ -17,13 +17,13 @@
 #   ./scripts/apply_latency_sweep.sh [출력디렉터리]
 #
 # 환경변수:
-#   ADDRS        -addrs 에 줄 주소 목록 (기본: env.sh 의 NODES/TOPO 에서 생성)
-#                **IPoIB 주소여야 한다** -- rdma_cm 이 IP 로 장치를 찾는다
+#   ADDRS        -addrs 에 줄 주소 목록 (기본: env.sh 의 NODES/TOPO 와 TRANSPORT 의 망에서 생성)
+#                rdma/tcp-ib 는 IPoIB(rdma_cm 이 IP 로 장치를 찾는다), tcp 는 이더넷
 #   SIZES        페이로드 바이트 목록 (기본 1Ki..128Ki 를 2배씩)
 #   N            지점당 명령 수 (기본 10000)
 #   BATCH        RPC 당 명령 수 (기본 1). 지연을 재는 것이므로 1 이 기본이다
 #   REPS         지점당 반복 횟수 (기본 1). CSV 에 rep 컬럼으로 들어간다
-#   TRANSPORT    rdma (기본) | tcp
+#   TRANSPORT    rdma (기본) | tcp (이더넷) | tcp-ib (IPoIB) -- start_node.sh 3번째 인자와 같게
 #   TIMEOUT_S    리더 탐색 타임아웃 (기본 15)
 #   BIN          바이너리 디렉터리 (기본 <repo>/build)
 #   RING_BYTES   노드의 링 크기 = -ring-pages × 4096 (기본 16MiB).
@@ -106,13 +106,22 @@ OUTDIR="${1:-$HOME/raftof_clean/csv/apply_latency_$(date +%Y%m%d-%H%M%S)}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="${BIN:-$REPO/build}"
 
-# 기본값: env.sh 의 NODES/TOPO 로 만든 IPoIB 주소 (노드를 띄운 것과 같은 TOPO 를 줄 것)
-ADDRS="${ADDRS:-$(source "$REPO/env.sh" >/dev/null 2>&1 && build_cluster ipoib >/dev/null 2>&1 && echo "$ADDRS")}"
+TRANSPORT="${TRANSPORT:-rdma}"
+# TRANSPORT 는 노드를 띄운 start_node.sh 의 구성 이름과 같게: rdma | tcp (이더넷) | tcp-ib (IPoIB).
+# 클라이언트 바이너리는 rdma|tcp 만 안다 -> tcp-ib 는 -transport tcp + IPoIB 주소.
+case "$TRANSPORT" in
+    rdma|tcp-ib) ADDR_NET=ipoib ;;
+    tcp)         ADDR_NET=eth ;;
+    *) printf '  [FAIL] TRANSPORT 는 rdma|tcp|tcp-ib: %s\n' "$TRANSPORT" >&2; exit 1 ;;
+esac
+CLIENT_TRANSPORT="$TRANSPORT"
+[ "$TRANSPORT" = "tcp-ib" ] && CLIENT_TRANSPORT=tcp
+# 기본값: env.sh 의 NODES/TOPO 로 만든 그 망의 주소 (노드를 띄운 것과 같은 TOPO 를 줄 것)
+ADDRS="${ADDRS:-$(source "$REPO/env.sh" >/dev/null 2>&1 && build_cluster "$ADDR_NET" >/dev/null 2>&1 && echo "$ADDRS")}"
 SIZES="${SIZES:-1024 2048 4096 8192 16384 32768 65536 131072}"
 N="${N:-10000}"
 BATCH="${BATCH:-1}"
 REPS="${REPS:-1}"
-TRANSPORT="${TRANSPORT:-rdma}"
 TIMEOUT_S="${TIMEOUT_S:-15}"
 
 RING_BYTES="${RING_BYTES:-$((16 * 1024 * 1024))}"
@@ -213,6 +222,13 @@ log "output -> $OUTDIR"
 if (source "$REPO/env.sh" >/dev/null 2>&1 && record_io_pin "$OUTDIR/io_pin.txt"); then
     while IFS= read -r l; do log "io pin: $l"; done < "$OUTDIR/io_pin.txt"
 fi
+# 전송 구성·NIC·IRQ·C-state 스냅샷 (env.sh record_net_cond). 노드의 구성이 TRANSPORT 와 다르면 경고
+if (source "$REPO/env.sh" >/dev/null 2>&1 && TRANSPORT="$TRANSPORT" record_net_cond "$OUTDIR/net_cond.txt"); then
+    log "net cond -> $OUTDIR/net_cond.txt"
+    if grep '^  transport' "$OUTDIR/net_cond.txt" | grep -qv "transport   : $TRANSPORT "; then
+        warn "노드 중 구성이 TRANSPORT=$TRANSPORT 와 다른 것이 있다 (net_cond.txt 확인)"
+    fi
+fi
 printf '  addrs     : %s\n  transport : %s\n' \
     "$ADDRS" "$TRANSPORT"
 printf '  n         : %s   batch: %s   reps: %s\n' "$N" "$BATCH" "$REPS"
@@ -262,7 +278,7 @@ fi
 # ---------------------------------------------------------------------------
 log "preflight: commit-index"
 naddrs=$(printf '%s\n' "$ADDRS" | tr ',' '\n' | grep -c '[^[:space:]]')
-run_client "$OUTDIR/preflight.log" -addrs "$ADDRS" -op commit-index -transport "$TRANSPORT"
+run_client "$OUTDIR/preflight.log" -addrs "$ADDRS" -op commit-index -transport "$CLIENT_TRANSPORT"
 rc=$?
 sed 's/^/       /' "$OUTDIR/preflight.log"
 nreach=$(grep -c 'commit_index=' "$OUTDIR/preflight.log")
@@ -279,7 +295,7 @@ ok "$nreach/$naddrs nodes answered"
 if [ "$WARMUP" != "0" ]; then
     log "warmup: $WARMUP_N × ${WARMUP_SIZE}B (cmd ${WARMUP_CMD}B, ring=${RING_BYTES}B, ~1.2 laps) -- discarded"
     run_client "$OUTDIR/warmup.log" -addrs "$ADDRS" -op apply -n "$WARMUP_N" -size "$WARMUP_CMD" \
-        -batch "$WARMUP_BATCH" -timeout-s "$TIMEOUT_S" -transport "$TRANSPORT"
+        -batch "$WARMUP_BATCH" -timeout-s "$TIMEOUT_S" -transport "$CLIENT_TRANSPORT"
     if [ $? -ne 0 ]; then
         fail "warmup failed -- see $OUTDIR/warmup.log"
         tail -5 "$OUTDIR/warmup.log" | sed 's/^/       /'
@@ -316,7 +332,7 @@ run_point() {
     local cmd=$(( size - HDR ))   # ENTRY_SIZES=1 이면 헤더를 뺀 명령 크기
 
     run_client "$plog" -addrs "$ADDRS" -op apply-timed -n "$N" -size "$cmd" \
-        -batch "$BATCH" -timeout-s "$TIMEOUT_S" -transport "$TRANSPORT"
+        -batch "$BATCH" -timeout-s "$TIMEOUT_S" -transport "$CLIENT_TRANSPORT"
     local rc=$?
     # 실패한 지점이라도 리더 탐색까지 갔으면 리더 줄은 남아 있다
     POINT_LEADER=$(parse_leader "$plog")

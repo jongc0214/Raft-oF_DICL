@@ -703,3 +703,115 @@ cd /home/jongc/raftof_clean && ./remote_pull.sh down
 eternity1
 cd /home/jongc/raftof_clean && ./remote_pull.sh down
 각 호스트에서 ./remote_pull.sh status로 확인한다. 스크립트 자체는 bash -n으로 문법을 검사하고, 세 호스트에서 status를 실행해 본다(읽기만 한다). up/down은 sudo가 필요하므로 사용자가 직접 실행한다.
+
+## 12. RDMA vs TCP 비교 (같은 랙, TCP 는 이더넷 기준) — DECISIONS.md D25
+
+구성은 `start_node.sh` 3번째 인자 하나로 정한다. 주소·NVMe 전송이 구성과 다르면 `check_transport` 가 기동을 거부한다.
+
+| 구성 | raft / blockcopy RPC | NVMe-oF | 비고 |
+|---|---|---|---|
+| `rdma` | RDMA, 10.0.0.x | rdma 10.0.0.91:4420 | |
+| `tcp` | TCP, 115.145.173.x (eno0) | tcp 115.145.173.243:4421 | TCP 본 실험 |
+| `tcp-ib` | TCP, 10.0.0.x (ibp59s0) | tcp 10.0.0.91:4421 | IPoIB 전환 선택지 |
+
+sudo 단계는 사용자가 실행한다. 공유 장비라 시작 전에 점유를 확인하고, 끝나면 rdma 로 되돌린다.
+
+### 12-0. 바이너리 다시 빌드 (TCP 코덱이 바뀌었다)
+
+eternity5
+```
+cd /home/jongc/raftof_clean && ./build.sh all
+```
+와이어 포맷은 그대로라 옛 바이너리와도 통신은 된다 -- 기동 배너의 `binary ... (sha ...)` 가 세 종류(노드·클라이언트·
+blockcopy 서버) 모두 새 빌드인지 확인한다.
+
+### 12-1. tcp (이더넷) 로 전환
+
+raft_node·blockcopy 서버·braft 를 모두 멈춘 뒤, 이 순서로. 노드 쪽은 처음에 `--dry-run` 으로 명령만 확인한다
+(예: `sudo NET=eth TOPO=3 ./nvmeof_switch.sh tcp --all-members --dry-run`).
+
+eternitystorage
+```
+cd /home/jongc/raftof_clean && NET=eth TOPO=3 ./nvmet_tcp_port.sh up
+```
+eternity4
+```
+cd /home/jongc/raftof_clean && sudo NET=eth TOPO=3 ./nvmeof_switch.sh tcp --all-members && ./scripts/probe_io_queues.sh
+```
+eternity5
+```
+cd /home/jongc/raftof_clean && sudo NET=eth TOPO=3 ./nvmeof_switch.sh tcp --all-members && ./scripts/probe_io_queues.sh
+```
+eternity6
+```
+cd /home/jongc/raftof_clean && sudo NET=eth TOPO=3 ./nvmeof_switch.sh tcp --all-members && ./scripts/probe_io_queues.sh
+```
+
+### 12-2. 기동과 측정 (tcp)
+
+eternitystorage
+```
+cd /home/jongc/raftof_clean && ./start_blockcopy.sh tcp
+```
+eternity4
+```
+cd /home/jongc/raftof_clean && ./start_node.sh 4 destination tcp
+```
+eternity5
+```
+cd /home/jongc/raftof_clean && ./start_node.sh 5 destination tcp
+```
+eternity6
+```
+cd /home/jongc/raftof_clean && ./start_node.sh 6 destination tcp
+```
+측정 (클라이언트 호스트)
+```
+cd /home/jongc/raftof_clean && TRANSPORT=tcp SIZES="4096 65536 1048576 4194304" ./scripts/apply_latency_sweep.sh
+```
+결과 디렉터리의 `net_cond.txt` 에서 노드 구성이 모두 `tcp` 인지 확인한다. braft 는 `./start_braft.sh <id> tcp`
+(기본 `NET=eth`) 로 띄우고 `./scripts/braft_size_latency_sweep.sh tcp` 로 잰다.
+
+### 12-3. IPoIB 로 전환 (tcp-ib)
+
+코드는 그대로이고 주소만 바뀐다. 12-1 에서 `NET=eth` 를 `NET=ipoib` 로, 12-2 에서 `tcp` 를 `tcp-ib` 로 바꾼다.
+
+eternitystorage
+```
+cd /home/jongc/raftof_clean && NET=ipoib TOPO=3 ./nvmet_tcp_port.sh up
+```
+eternity4
+```
+cd /home/jongc/raftof_clean && sudo NET=ipoib TOPO=3 ./nvmeof_switch.sh tcp --all-members && ./scripts/probe_io_queues.sh
+```
+eternity5
+```
+cd /home/jongc/raftof_clean && sudo NET=ipoib TOPO=3 ./nvmeof_switch.sh tcp --all-members && ./scripts/probe_io_queues.sh
+```
+eternity6
+```
+cd /home/jongc/raftof_clean && sudo NET=ipoib TOPO=3 ./nvmeof_switch.sh tcp --all-members && ./scripts/probe_io_queues.sh
+```
+기동은 `./start_blockcopy.sh tcp-ib`, `./start_node.sh <id> destination tcp-ib`, 측정은 `TRANSPORT=tcp-ib`.
+braft 는 `NET=ipoib ./start_braft.sh <id> tcp`, `NET=ipoib ./scripts/braft_size_latency_sweep.sh tcp`.
+IPoIB 완료 IRQ 는 노드에서 NUMA1 까지 흩어져 있으므로 각 노드에서 `IFACE=ibp59s0 ./storage_irq.sh up` (끝나면 `down`).
+이더넷 IRQ 는 이미 NIC 노드 안이다 (`IFACE=eno0 ./storage_irq.sh status`).
+
+### 12-4. rdma 로 되돌리기
+
+eternity4
+```
+cd /home/jongc/raftof_clean && sudo TOPO=3 ./nvmeof_switch.sh rdma --all-members && ./scripts/probe_io_queues.sh
+```
+eternity5
+```
+cd /home/jongc/raftof_clean && sudo TOPO=3 ./nvmeof_switch.sh rdma --all-members && ./scripts/probe_io_queues.sh
+```
+eternity6
+```
+cd /home/jongc/raftof_clean && sudo TOPO=3 ./nvmeof_switch.sh rdma --all-members && ./scripts/probe_io_queues.sh
+```
+eternitystorage
+```
+cd /home/jongc/raftof_clean && NET=eth ./nvmet_tcp_port.sh down && NET=ipoib ./nvmet_tcp_port.sh down
+```

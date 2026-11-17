@@ -278,6 +278,9 @@ add_executable(raft_unit_tests
     # protobuf/net 없이 직접 넣어도 isolation_raft_unit_tests 가 유지된다.
     tests/test_blockcopy_read_fd.cpp
     storage/raft_blockcopy_server.cpp
+    # TCP 프레이밍도 core/protobuf 를 모른다 -- 소스를 직접 넣는다 (socketpair 테스트).
+    tests/test_wire_codec.cpp
+    net/src/raft_wire_codec.cpp
 )
 target_include_directories(raft_unit_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 target_link_libraries(raft_unit_tests PRIVATE

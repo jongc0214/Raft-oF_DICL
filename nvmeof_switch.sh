@@ -6,8 +6,12 @@
 # /mnt/raftvol 에 다시 마운트한다. 노드마다 따로 실행해야 한다.
 #
 #   sudo ./nvmeof_switch.sh status
-#   sudo ./nvmeof_switch.sh tcp  [-n NQN] [-i QUEUES] [-d EXPECT_DEV] [--dry-run] [--force]
-#   sudo ./nvmeof_switch.sh rdma [-n NQN] [-i QUEUES] [-d EXPECT_DEV] [--dry-run] [--force]
+#   sudo ./nvmeof_switch.sh tcp  [-n NQN | --all-members] [-i QUEUES] [-d EXPECT_DEV] [--dry-run] [--force]
+#   sudo ./nvmeof_switch.sh rdma [-n NQN | --all-members] [-i QUEUES] [-d EXPECT_DEV] [--dry-run] [--force]
+#
+#   망 (11-16): NVMe/TCP 는 NET 이 정한다. NET=eth(기본) -> 115.145.173.243:4421 (TCP 본 실험),
+#   NET=ipoib -> 10.0.0.91:4421 (tcp-ib). RDMA 는 늘 10.0.0.91:4420. 타깃 포트는 eternitystorage 의
+#   nvmet_tcp_port.sh up 이 만든다. sudo 가 환경변수를 지우므로 sudo NET=ipoib TOPO=3 ./... 처럼 넘긴다.
 #
 #   -n NQN         대상 subsystem NQN. 생략하면 자동 결정 (순서):
 #                    1) /mnt/raftvol 에 마운트된 장치의 subsystem
@@ -18,8 +22,14 @@
 #   -d EXPECT_DEV  재연결 후 마운트된 장치가 이 값과 다르면 경고
 #   --dry-run      실행할 명령만 출력
 #   --force        이미 목표 전송이어도 재연결
+#   --all-members  env.sh 의 NODES(TOPO) 멤버 볼륨 전부를 전환한다 (push/pull 은 모든 멤버 볼륨이
+#                  붙어 있어야 한다). /mnt/raftvol 에 마운트된 볼륨만 umount/mount 하고 나머지는
+#                  다시 붙이기만 한다. 붙어 있지 않던 멤버는 새로 붙인다.
 #
-# 환경변수: MNT(/mnt/raftvol) TCP_ADDR RDMA_ADDR PORT(4420) QUEUES STATE_FILE
+# 환경변수: MNT(/mnt/raftvol) NET(eth|ipoib) TCP_ADDR RDMA_ADDR TCP_PORT(4421) RDMA_PORT(4420)
+#           QUEUES(8, 전 호스트 통일) STATE_FILE TOPO/NODES(--all-members)
+#
+# 전환한 뒤에는 큐->CPU 배치가 바뀌므로 ./scripts/probe_io_queues.sh 를 다시 돌릴 것.
 #
 # 사전 조건: 이 볼륨을 쓰는 프로세스(raft_node, braft, hashicorp 등)를 먼저 멈출 것.
 #           /mnt/raftvol 이 busy 면 umount 전에 중단한다.
@@ -27,10 +37,17 @@
 set -euo pipefail
 
 MNT="${MNT:-/mnt/raftvol}"
-TCP_ADDR="${TCP_ADDR:-115.145.173.243}"
+NET="${NET:-eth}"
+case "$NET" in
+    eth)   TCP_ADDR="${TCP_ADDR:-115.145.173.243}" ;;
+    ipoib) TCP_ADDR="${TCP_ADDR:-10.0.0.91}" ;;
+    *) echo "ERROR: NET 은 eth|ipoib: $NET" >&2; exit 1 ;;
+esac
 RDMA_ADDR="${RDMA_ADDR:-10.0.0.91}"
-PORT="${PORT:-4420}"
-QUEUES="${QUEUES:-}"
+TCP_PORT="${TCP_PORT:-4421}"
+RDMA_PORT="${RDMA_PORT:-${PORT:-4420}}"
+QUEUES="${QUEUES:-8}"
+ALL=0
 STATE_FILE="${STATE_FILE:-/var/lib/nvmeof_switch.nqn}"
 NQN_SRC=""
 
@@ -41,7 +58,7 @@ FORCE=0
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
-usage() { sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+usage() { sed -n '2,/^[^#]/{/^#/p}' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
 
 run() {
     echo "+ $*"
@@ -101,8 +118,8 @@ nqn_of_dev() {
 # target 이 노출 중인 subsystem NQN 목록 (tcp 먼저, 안 되면 rdma)
 discover_nqns() {
     {
-        nvme discover -t tcp  -a "$TCP_ADDR"  -s "$PORT" 2>/dev/null ||
-        nvme discover -t rdma -a "$RDMA_ADDR" -s "$PORT" 2>/dev/null || true
+        nvme discover -t tcp  -a "$TCP_ADDR"  -s "$TCP_PORT" 2>/dev/null ||
+        nvme discover -t rdma -a "$RDMA_ADDR" -s "$RDMA_PORT" 2>/dev/null || true
     } | awk '/^subnqn:/ {print $2}' | grep -v '^nqn\.2014-08\.org\.nvmexpress\.discovery$' || true
 }
 
@@ -145,39 +162,41 @@ pick_nqn() {
 }
 
 switch_to() {
-    local target="$1" addr cur src base uuid i newsrc
+    local target="$1" addr port cur curaddr src base uuid i newsrc ownmnt=1 d
 
     case "$target" in
-        tcp)  addr="$TCP_ADDR" ;;
-        rdma) addr="$RDMA_ADDR" ;;
+        tcp)  addr="$TCP_ADDR"; port="$TCP_PORT" ;;
+        rdma) addr="$RDMA_ADDR"; port="$RDMA_PORT" ;;
     esac
 
     [[ $EUID -eq 0 ]] || die "root 로 실행하라 (sudo)."
     command -v nvme >/dev/null || die "nvme-cli 가 없다."
 
     pick_nqn
-    echo "target=$target addr=$addr:$PORT nqn=$NQN queues=${QUEUES:-<default>}"
+    echo "target=$target addr=$addr:$port nqn=$NQN queues=${QUEUES:-<default>}"
     echo "NQN 결정 근거: $NQN_SRC"
 
     cur="$(fabric_ctrls | awk -v n="$NQN" '$4==n {print $2}' | sort -u | tr '\n' ' ')"
-    echo "current transport(s) for $NQN: ${cur:-<none>}"
-    if [[ "$cur" == "$target " && $FORCE -eq 0 ]]; then
-        echo "이미 $target 이다 (--force 로 재연결)."
-        status
+    curaddr="$(fabric_ctrls | awk -v n="$NQN" '$4==n {print $3}' | sort -u | tr '\n' ' ')"
+    echo "current transport(s) for $NQN: ${cur:-<none>} ${curaddr}"
+    # 전송만이 아니라 주소(망)까지 같아야 "이미 목표" 다 (tcp 이더넷 <-> tcp IPoIB 전환)
+    if [[ "$cur" == "$target " && "$curaddr" == "traddr=$addr,trsvcid=$port"* && $FORCE -eq 0 ]]; then
+        echo "이미 $target $addr:$port 이다 (--force 로 재연결)."
+        [[ $ALL -eq 1 ]] || status
         return 0
     fi
 
     # 사전 점검(읽기 전용): 목표 전송으로 이 NQN 이 실제로 보이는지 먼저 확인한다.
     # 안 보이면 끊은 뒤 못 붙는 사고가 나므로 umount/disconnect 전에 중단한다.
     local seen
-    seen="$(nvme discover -t "$target" -a "$addr" -s "$PORT" 2>/dev/null |
+    seen="$(nvme discover -t "$target" -a "$addr" -s "$port" 2>/dev/null |
             awk '/^subnqn:/ {print $2}' || true)"
     if ! printf '%s\n' "$seen" | grep -qx "$NQN"; then
         echo "target $addr:$PORT ($target) 에서 보이는 NQN:" >&2
         printf '%s\n' "$seen" | grep -v '^$' | sed 's/^/  /' >&2
-        die "$NQN 이 $target 으로 노출되지 않는다. 아무것도 끊지 않았다."
+        die "$NQN 이 $target 으로 노출되지 않는다. 아무것도 끊지 않았다. (스토리지: nvmet_tcp_port.sh up)"
     fi
-    echo "preflight OK: $NQN 이 $target($addr:$PORT) 에서 보인다."
+    echo "preflight OK: $NQN 이 $target($addr:$port) 에서 보인다."
 
     src="$(findmnt -no SOURCE "$MNT" 2>/dev/null || true)"
     uuid=""
@@ -186,8 +205,19 @@ switch_to() {
         base="$(basename "$src")"
         base="${base%p[0-9]*}"
         if ! find_ns "$NQN" | grep -qx "$base"; then
-            die "$MNT 의 장치($src)가 NQN=$NQN 의 namespace 가 아니다. -n 을 확인하라."
+            [[ $ALL -eq 1 ]] || die "$MNT 의 장치($src)가 NQN=$NQN 의 namespace 가 아니다. -n 을 확인하라."
+            ownmnt=0   # --all-members: 마운트는 다른 멤버 볼륨 -- 이 볼륨은 다시 붙이기만 한다
+            src=""
         fi
+    fi
+    # 마운트되지 않은 namespace 도 raw 로 쓰는 프로세스(push 모드 raft_node, blockcopy)가 있으면 멈춘다
+    for d in $(find_ns "$NQN"); do
+        if command -v fuser >/dev/null && fuser -s "/dev/$d" 2>/dev/null; then
+            fuser -v "/dev/$d" >&2 || true
+            die "/dev/$d ($NQN) 를 쓰는 프로세스가 있다. 먼저 멈춰라."
+        fi
+    done
+    if [[ -n "$src" ]]; then
         uuid="$(blkid -s UUID -o value "$src" 2>/dev/null || true)"
         echo "mount source=$src uuid=${uuid:-<none>}"
 
@@ -197,15 +227,17 @@ switch_to() {
             die "먼저 노드 프로세스를 멈춰라."
         fi
         run umount "$MNT"
+    elif [[ $ownmnt -eq 0 ]]; then
+        echo "$MNT 에는 다른 멤버 볼륨이 마운트돼 있다 (이 볼륨은 재연결만 한다)."
     else
         echo "$MNT 는 마운트돼 있지 않다 (재연결만 한다)."
     fi
 
-    run nvme disconnect -n "$NQN"
+    [[ -n "$cur" ]] && run nvme disconnect -n "$NQN"
     run modprobe nvme-fabrics
     run modprobe "nvme-$target"
 
-    local cmd=(nvme connect -t "$target" -a "$addr" -s "$PORT" -n "$NQN")
+    local cmd=(nvme connect -t "$target" -a "$addr" -s "$port" -n "$NQN")
     [[ -n "$QUEUES" ]] && cmd+=(-i "$QUEUES")
     run "${cmd[@]}"
 
@@ -232,11 +264,13 @@ switch_to() {
         fi
     fi
 
-    printf '%s\n' "$NQN" > "$STATE_FILE" 2>/dev/null || true
+    [[ $ownmnt -eq 1 && -n "$src" ]] && { printf '%s\n' "$NQN" > "$STATE_FILE" 2>/dev/null || true; }
+    [[ $ALL -eq 1 ]] && return 0
 
     echo
     echo "=== 검증 ==="
     status
+    echo "다음: ./scripts/probe_io_queues.sh 를 다시 돌린다 (재연결로 큐->CPU 배치가 바뀐다)"
     if [[ -n "$EXPECT_DEV" ]]; then
         local now
         now="$(findmnt -no SOURCE "$MNT" 2>/dev/null || true)"
@@ -257,12 +291,32 @@ while [[ $# -gt 0 ]]; do
         -d) EXPECT_DEV="${2:?-d 값 필요}"; shift 2 ;;
         --dry-run) DRY=1; shift ;;
         --force) FORCE=1; shift ;;
+        --all-members) ALL=1; shift ;;
         *) usage ;;
     esac
 done
 
+# --all-members: env.sh 의 NODES 순서대로 멤버 nqn 전부
+switch_all() {
+    local target="$1" nqns n
+    [[ -z "$NQN" ]] || die "--all-members 와 -n 은 같이 쓸 수 없다"
+    nqns="$(source "$(dirname "$0")/env.sh" >/dev/null 2>&1; for id in $NODES; do _pool_field "$id" 3; done)"
+    [[ -n "$nqns" ]] || die "env.sh 에서 멤버 nqn 을 얻지 못했다 (TOPO/NODES 확인)"
+    echo "members ($NET): $(echo $nqns)"
+    for n in $nqns; do
+        echo
+        echo "---- $n ----"
+        NQN="$n"; NQN_SRC="--all-members"
+        switch_to "$target"
+    done
+    echo
+    echo "=== 검증 ==="
+    status
+    echo "다음: ./scripts/probe_io_queues.sh 를 다시 돌린다 (재연결로 큐->CPU 배치가 바뀐다)"
+}
+
 case "$CMD" in
     status)    status ;;
-    tcp|rdma)  switch_to "$CMD" ;;
+    tcp|rdma)  if [[ $ALL -eq 1 ]]; then switch_all "$CMD"; else switch_to "$CMD"; fi ;;
     *)         usage ;;
 esac

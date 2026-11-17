@@ -72,6 +72,8 @@ constexpr int kCallTimeoutMs = 5000;
  * (reap_finished_threads 는 done 이 선 것만 회수한다) 결국 pthread_create 실패 ->
  * std::terminate 로 리더가 죽는다. 2000µs 는 실측 AE_RT 최대(128KiB 에서
  * 958µs)의 두 배이므로 정상 동작에서는 절대 블로킹으로 내려가지 않는다. */
+/* TCP 전송(net/src/raft_wire_codec.cpp 의 kTcpSpinServeUs / kTcpSpinClientUs)도 같은 값을
+ * 쓴다 (11-13: RDMA·TCP 둘 다 폴링). 여기를 바꾸면 그쪽도 바꿀 것. */
 constexpr int kSpinServeUs  = -1;     /* serve_rdma_connection: 무한 */
 // constexpr int kSpinServeUs  = 0;     /* serve_rdma_connection: sleep */
 constexpr int kSpinClientUs = 2000;   /* rdma_invoke: 유계 */

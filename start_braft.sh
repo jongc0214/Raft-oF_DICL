@@ -18,12 +18,11 @@
 #   두면 세그먼트 fdatasync 의 저널 커밋에 섞인다. run_block_node.sh(root 소유)는 고치지 않고
 #   BLOCK_BUILD_DIR 를 넘겨 사본을 쓰게 한다.
 #
-# 환경변수: TOPO(3|4|5|6|7|9, 기본 3) 또는 NODES, KEEP_DATA, NUMA_BIND, RDMA_DEV, BRAFT_TOOLS, LOCAL_RUN
+# 환경변수: TOPO(3|4|5|6|7|9, 기본 3) 또는 NODES, NET(eth|ipoib, 기본 eth), KEEP_DATA, NUMA_BIND, RDMA_DEV,
+#           BRAFT_TOOLS, LOCAL_RUN, CHECK_TRANSPORT
 # 멈추기: ./stop_braft.sh <node-id>
 #
 set -euo pipefail
-
-BRAFT_TOOLS="${BRAFT_TOOLS:-/home/jongc/braft/braft_block_tools}"
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
     sed -n '2,/^[^#]/{/^#/p}' "$0" | sed 's/^# \{0,1\}//'
@@ -32,6 +31,27 @@ fi
 ID="$1"
 TRANSPORT="${2:-rdma}"
 case "$TRANSPORT" in rdma|tcp) ;; *) echo "transport 는 rdma|tcp: $TRANSPORT"; exit 1 ;; esac
+
+# NET: braft 피어 주소의 망. eth(기본, TCP 본 실험) = 원본 cluster.env 의 1GbE 주소,
+#   ipoib = env.sh braft_tools_dir 가 만든 사본(POOL 만 10.0.0.x). BRAFT_TOOLS 를 직접 주면 그것을 쓴다.
+#   측정 스크립트(scripts/braft_*.sh)에도 같은 NET 을 줄 것.
+NET="${NET:-eth}"
+case "$NET" in eth|ipoib) ;; *) echo "NET 은 eth|ipoib: $NET"; exit 1 ;; esac
+if [[ -z "${BRAFT_TOOLS:-}" ]]; then
+    BRAFT_TOOLS="$(source "$(dirname "$0")/env.sh" >/dev/null 2>&1; braft_tools_dir "$NET")" ||
+        { echo "ERROR: braft 도구 디렉터리를 만들지 못했다 (NET=$NET)"; exit 1; }
+fi
+echo "[start_braft] NET=$NET tools=$BRAFT_TOOLS"
+
+# 구성 확인 (env.sh check_transport): NVMe 전송이 braft 전송·망과 맞는지. braft 주소는 위 사본이 정한다.
+#   rdma -> NVMe rdma, tcp+eth -> NVMe tcp(이더넷), tcp+ipoib -> NVMe tcp(IPoIB)
+case "$TRANSPORT/$NET" in
+    rdma/*)    CHK_MODE=rdma ;;
+    tcp/eth)   CHK_MODE=tcp ;;
+    tcp/ipoib) CHK_MODE=tcp-ib ;;
+esac
+( export TOPO="${TOPO:-3}"; source "$(dirname "$0")/env.sh" >/dev/null 2>&1; unset CLUSTER
+  MY_ID="$ID" check_transport "$CHK_MODE" ) || exit 1
 
 as_root() { if [[ $EUID -eq 0 ]]; then "$@"; else sudo "$@"; fi; }
 # sudo 가 환경변수를 지우므로 braft 스크립트가 읽는 값은 env 로 넘긴다
