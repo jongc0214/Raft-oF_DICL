@@ -238,13 +238,6 @@ struct AppendEntriesResponse {
     int64_t storage_write_ns = 0;
     int64_t storage_sync_ns = 0;     /* fdatasync(dst). normal 모드는 자기 링 fdatasync */
 
-    /* HandleAppendEntriesRequest follower 서브스테이지 계측 */
-    int64_t handle_ae_lock_wait_ns = 0;   /* entry -> mu.Lock() 획득 */
-    int64_t handle_ae_pre_ns = 0;         /* lock 이후 -> doPBACopy 전 unlock */
-    int64_t handle_ae_lock_wait2_ns = 0;  /* doPBACopy 반환 후 재lock 대기 */
-    int64_t handle_ae_post_ns = 0;        /* 재lock -> 반환, persistCircular 제외 */
-    int64_t handle_ae_persist_ns = 0;     /* persistCircular (header-only) 시간 */
-
     /* push_map_hash: 팔로워가 push 모드면 자기 링의 extent 맵 해시, 아니면 0.
      * 리더는 이 값으로 push 후보를 알아보고, 나중에 받아 둔 맵이 아직
      * 유효한지 확인한다 (DECISIONS.md D20). 성공/거절과 무관하게 실린다. */
@@ -290,16 +283,9 @@ struct ClientApplyTimedResponse {
     int64_t repl_net_ns = 0;
     int64_t replication_ns = 0;
     int64_t quorum_wait_ns = 0;
-    int64_t mutex_ns = 0;
-    int64_t mutex_a_ns = 0;
-    int64_t mutex_b_ns = 0;
-    int64_t mutex_c_ns = 0;
     int64_t total_ns = 0;
     bool busy = false;
     int retry_after_ms = 0;
-    int64_t post_rpc_ns = 0;
-    int64_t commit_wait_ns = 0;
-    int64_t wg_scheduling_ns = 0;
     int64_t storage_read_ns = 0;    /* StorageIO 중 pread 합 */
     int64_t storage_write_ns = 0;   /* StorageIO 중 pwrite 합 */
     int64_t storage_sync_ns = 0;    /* StorageIO 중 fdatasync */

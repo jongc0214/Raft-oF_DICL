@@ -33,14 +33,14 @@
 #                        **mean 이라야 항등식이 성립한다** (p50 끼리는 더할 수 없다)
 #   client_wall.csv      size_bytes,size_label,reps,us_per_cmd
 #                        클라이언트 벽시계 wall / N. size_latency_sweep.sh 의
-#                        mean_us 와 견줄 값이다 (profile 오버헤드 확인용)
+#                        mean_us 와 견줄 값이다 (계측 오버헤드 확인용)
 #
 # ── 읽기 전에 알 것 ───────────────────────────────────────────────────────
 #
-# **노드에 -profile 이 켜져 있어야 한다.** 꺼져 있으면 항들이 0 으로 나온다
-# (apply_latency_sweep.sh 가 첫 지점에서 경고한다). -profile 자체가 지연을 조금
-# 올리므로 절대값은 size_latency_sweep.sh (profile 없이 띄운 노드) 쪽을 쓰고,
-# 이 스크립트는 항의 비중을 보는 데 쓸 것.
+# 항들이 0 으로 나오면 샘플 폴백 경로다 (apply_latency_sweep.sh 가 첫 지점에서
+# 경고한다). apply-timed 는 샘플 수집·항등식 계산만큼 지연을 조금 올리므로
+# 절대값은 size_latency_sweep.sh (plain apply) 쪽을 쓰고, 이 스크립트는 항의
+# 비중을 보는 데 쓸 것.
 #
 # **push 모드에서는 ReplNet 이 0 이다** -- 팔로워가 pull 하지 않으므로.
 # 팔로워 데이터 경로는 StorageIO 쪽에 잡힌다 (compare_latency.sh 머리 주석).

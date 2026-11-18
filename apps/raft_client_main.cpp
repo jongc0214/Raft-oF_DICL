@@ -272,7 +272,7 @@ int main(int argc, char **argv) {
          * 항들이 전부 timings_clamp0 을 거치므로 0 이 아닐 수 있고, 음수도
          * 나올 수 있다 -- 그 부호 자체가 정보다.
          *
-         * Mutex* / CommitWait / SRead / SWrite / SSync 는 진단용이라 합에 안 들어간다.
+         * SRead / SWrite / SSync 는 진단용이라 합에 안 들어간다.
          * SRead / SWrite 는 StorageIO 중 스토리지 서버의 pread / pwrite 합, SSync 는
          * 서버의 fdatasync(dst) 다. 워커 1개일 때
          *   StorageIO - (SRead + SWrite + SSync) = 워커 생성/join + 버퍼 풀 등 서버 내부.
@@ -282,7 +282,7 @@ int main(int argc, char **argv) {
          * 즉 표본 수 = **성공한 RPC 수**이고 n/batch 와 다를 수 있다. */
         static const char *kTimedTerms[] = {
             "Total", "LHandler", "LPersist", "AENet", "FHandler",
-            "ReplNet", "StorageIO", "QuorumWait", "Mutex", "MutexA", "MutexB", "MutexC", "CommitWait",
+            "ReplNet", "StorageIO", "QuorumWait",
             "SRead", "SWrite", "SSync", "residual",
         };
         constexpr size_t kNTimedTerms = sizeof(kTimedTerms) / sizeof(kTimedTerms[0]);
@@ -323,8 +323,6 @@ int main(int argc, char **argv) {
                     rsp.total_nanos(),      rsp.l_handler_nanos(), rsp.l_persist_nanos(),
                     rsp.ae_net_nanos(),     rsp.f_handler_nanos(), rsp.repl_net_nanos(),
                     rsp.replication_nanos(), rsp.quorum_wait_nanos(),
-                    rsp.mutex_nanos(), rsp.mutex_a_nanos(), rsp.mutex_b_nanos(), rsp.mutex_c_nanos(),
-                    rsp.commit_wait_nanos(),
                     rsp.storage_read_nanos(), rsp.storage_write_nanos(),
                     rsp.storage_sync_nanos(),
                     rsp.total_nanos() - sum7,
@@ -332,21 +330,6 @@ int main(int argc, char **argv) {
                 for (size_t k = 0; k < kNTimedTerms; k++) {
                     timed[k].push_back(vals[k]);
                 }
-
-                // std::printf("  batch=%d total=%.1fus LHandler=%.1f LPersist=%.1f "
-                //             "AENet=%.1f FHandler=%.1f ReplNet=%.1f StorageIO=%.1f "
-                //             "QuorumWait=%.1f Mutex=%.1f CommitWait=%.1f\n",
-                //             this_batch,
-                //             rsp.total_nanos() / 1000.0,
-                //             rsp.l_handler_nanos() / 1000.0,
-                //             rsp.l_persist_nanos() / 1000.0,
-                //             rsp.ae_net_nanos() / 1000.0,
-                //             rsp.f_handler_nanos() / 1000.0,
-                //             rsp.repl_net_nanos() / 1000.0,
-                //             rsp.replication_nanos() / 1000.0,
-                //             rsp.quorum_wait_nanos() / 1000.0,
-                //             rsp.mutex_nanos() / 1000.0,
-                //             rsp.commit_wait_nanos() / 1000.0);
             } else {
                 rpcproto::ClientApplyRequest req;
                 for (int k = 0; k < this_batch; k++) {

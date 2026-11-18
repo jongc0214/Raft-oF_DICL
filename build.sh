@@ -28,6 +28,12 @@
 # 풀어놓고 아래 두 변수로 넘길 수 있다:
 #   PROTOBUF_SYSROOT=/path/to/sysroot ./build.sh all
 #   (또는 PROTOBUF_CFLAGS / PROTOBUF_LIBS를 직접 지정)
+#
+# apply-timed 분해 계측(리더/팔로워/스토리지 서버의 구간 타이머)은 기본으로
+# 켜져 있다. 계측 없이 전체 지연만 보려면 끄고 빌드한다:
+#   RAFT_TIMING=0 ./build.sh all
+# 끄면 apply-timed 는 Total 만 채운다 (plain apply latency_nanos 도 그대로).
+# 노드 3대와 스토리지 서버를 같은 값으로 빌드할 것 -- 섞으면 일부 항만 0이 된다.
 
 set -euo pipefail
 
@@ -120,7 +126,14 @@ else
     PB_LIBS="-lprotobuf"
 fi
 
-CXXFLAGS=(-std=$STD -Wall -Wextra -O2 "${INCLUDES[@]}")
+RAFT_TIMING="${RAFT_TIMING:-1}"
+if [[ "$RAFT_TIMING" != "0" && "$RAFT_TIMING" != "1" ]]; then
+    echo "[build.sh] RAFT_TIMING must be 0 or 1 (got '$RAFT_TIMING')" >&2
+    exit 1
+fi
+echo "[build.sh] RAFT_TIMING=$RAFT_TIMING (apply-timed breakdown timers $([[ $RAFT_TIMING == 1 ]] && echo on || echo off))"
+
+CXXFLAGS=(-std=$STD -Wall -Wextra -O2 -DRAFT_TIMING=$RAFT_TIMING "${INCLUDES[@]}")
 LDFLAGS=(-lpthread -lrdmacm -libverbs -luring)
 
 # 단일 바이너리 빌드 헬퍼: build_bin <out> <src...>

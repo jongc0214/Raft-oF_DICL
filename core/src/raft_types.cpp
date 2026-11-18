@@ -110,99 +110,7 @@ std::string to_string(ServerState s) {
 
 void ReplSink::push(const ReplSample &s) {
     std::lock_guard<std::mutex> lk(mu_);
-
     samples_.push_back(s);
-
-    // [Diag]
-    static const bool ae_stage_log = std::getenv("RAFT_AE_STAGE_LOG") != nullptr;
-    const size_t k = (n_followers_ + 1) / 2;
-    if (ae_stage_log && samples_.size() == k) {
-        int64_t aenet_ns = 0, fhandler_ns =0, replnet_ns = 0, storage_ns = 0;
-        
-        for(const auto &x : samples_) {
-            aenet_ns += x.ae_rt_ns - x.r2_ns;
-
-            fhandler_ns += x.r2_ns - x.write_pba_rt_ns;
-
-            replnet_ns += x.write_pba_rt_ns - x.storage_copy_ns;
-
-            storage_ns += x.storage_copy_ns;
-        }
-
-
-        /*
-         * ReplSink마다 mu_가 다르므로,
-         * static 누적값은 별도 mutex로 보호.
-         */
-        static std::mutex diag_mu;
-
-        static uint64_t total_requests = 0;
-        static int64_t total_aenet_ns = 0;
-        static int64_t total_fhandler_ns = 0;
-        static int64_t total_replnet_ns = 0;
-        static int64_t total_storage_ns = 0;
-
-        static uint64_t window_requests = 0;
-        static int64_t window_aenet_ns = 0;
-        static int64_t window_fhandler_ns = 0;
-        static int64_t window_replnet_ns = 0;
-        static int64_t window_storage_ns = 0;
-
-        std::lock_guard<std::mutex> diag_lk(diag_mu);
-
-        total_requests++;
-        total_aenet_ns += aenet_ns;
-        total_fhandler_ns += fhandler_ns;
-        total_replnet_ns += replnet_ns;
-        total_storage_ns += storage_ns;
-
-        window_requests++;
-        window_aenet_ns += aenet_ns;
-        window_fhandler_ns += fhandler_ns;
-        window_replnet_ns += replnet_ns;
-        window_storage_ns += storage_ns;
-
-        if (window_requests == 1000) {
-            /*
-             * 각 request마다 follower sample이 2개이므로
-             * denominator = requests * 2
-             */
-            const double window_samples =
-                static_cast<double>(window_requests) * static_cast<double>(n_followers_);
-
-            const double total_samples =
-                static_cast<double>(total_requests) * static_cast<double>(n_followers_);
-
-            std::fprintf(
-                stderr,
-                "[AE-STAGE-WINDOW] requests=%llu "
-                "AENet=%.1fus FHandler=%.1fus "
-                "ReplNet=%.1fus StorageIO=%.1fus\n",
-                static_cast<unsigned long long>(window_requests),
-                window_aenet_ns / 1000.0 / window_samples,
-                window_fhandler_ns / 1000.0 / window_samples,
-                window_replnet_ns / 1000.0 / window_samples,
-                window_storage_ns / 1000.0 / window_samples);
-
-            std::fprintf(
-                stderr,
-                "[AE-STAGE-TOTAL] requests=%llu "
-                "AENet=%.1fus FHandler=%.1fus "
-                "ReplNet=%.1fus StorageIO=%.1fus\n",
-                static_cast<unsigned long long>(total_requests),
-                total_aenet_ns / 1000.0 / total_samples,
-                total_fhandler_ns / 1000.0 / total_samples,
-                total_replnet_ns / 1000.0 / total_samples,
-                total_storage_ns / 1000.0 / total_samples);
-
-            window_requests = 0;
-            window_aenet_ns = 0;
-            window_fhandler_ns = 0;
-            window_replnet_ns = 0;
-            window_storage_ns = 0;
-        }
-    }
-    // [Diag]
 }
 
 void ReplSink::set_repl_start(clock_type::time_point t) {
@@ -248,11 +156,10 @@ std::pair<ReplSample, bool> ReplSink::quorum_sample(){
 void derive_apply_timings(const ApplyWalls &w, ReplSink *sink,
                           const ProfilingSink &prof, ApplyTimings &t) {
     t.l_persist_ns = w.nvme_ns;
+    /* LHandler = AE 발사 전까지 리더가 쓴 시간 - 자기 묶음의 persist.
+     * 그룹 커밋 큐 대기와 mu 대기가 여기 들어간다 (예전 a_held 기준에서는 residual). */
     t.l_handler_ns =
-        timings_clamp0(w.a_held_ns - w.nvme_ns);
-    t.replicate_ns = w.replicate_ns;
-    t.mutex_ns = w.mutex_a_ns;
-    t.commit_wait_ns = w.commit_wait_ns;
+        timings_clamp0(w.pre_repl_ns - w.nvme_ns);
  
     auto [sample, have] = sink->quorum_sample();
  
@@ -275,8 +182,6 @@ void derive_apply_timings(const ApplyWalls &w, ReplSink *sink,
             prof.sample_storage_write_ns.load();
         sample.storage_sync_ns =
             prof.sample_storage_sync_ns.load();
-        sample.mutex_ns = prof.sample_mutex_ns.load();
-        sample.mutex_c_ns = prof.sample_mutex_c_ns.load();
  
         /*
          * fallback을 유지하려면 이것도 같이 있어야 함.
@@ -387,76 +292,6 @@ void derive_apply_timings(const ApplyWalls &w, ReplSink *sink,
                 w.replicate_ns -
                 sample.ae_rt_ns);
     }
- 
-    /*
-     * Mutex diagnostic
-     */
-    if (sample.mutex_ns != 0) {
-        t.mutex_ns = sample.mutex_ns;
-    }
- 
-    t.mutex_c_ns = sample.mutex_c_ns;
-    t.mutex_a_ns = w.mutex_a_ns;
-    t.mutex_b_ns = sample.mutex_b_ns;
-    
-    t.wait_lock_ab_ns =
-        timings_clamp0(
-            t.mutex_ns -
-            t.mutex_c_ns);
- 
-    t.post_rpc_ns = sample.post_rpc_wall_ns;
-    t.pure_commit_wait_ns = w.commit_wait_ns;
- 
-    t.replicate_corrected_ns =
-        timings_clamp0(
-            w.replicate_ns -
-            t.mutex_ns);
- 
-    /*
-     * corrected QuorumWait도 mode별로 동일하게 분기해야 함.
-     */
-    if (pre_ae_copy) {
-        t.quorum_wait_corrected_ns =
-            timings_clamp0(
-                t.replicate_corrected_ns
-                - sample.write_pba_rt_ns
-                - sample.ae_rt_ns);
-    } else {
-        t.quorum_wait_corrected_ns =
-            timings_clamp0(
-                t.replicate_corrected_ns
-                - sample.ae_rt_ns);
-    }
- 
-    /*
-     * advanceCommitIndex 서브스테이지
-     */
-    t.aci_lock_wait_ns =
-        prof.aci_lock_wait_ns.load();
- 
-    t.aci_quorum_ns =
-        prof.aci_quorum_ns.load();
- 
-    t.aci_slot_gc_ns =
-        prof.aci_slot_gc_ns.load();
- 
-    t.aci_apply_loop_ns =
-        prof.aci_apply_loop_ns.load();
- 
-    t.aci_sort_ns =
-        prof.aci_sort_ns.load();
- 
-    t.aci_backpres_ns =
-        prof.aci_backpres_ns.load();
- 
-    t.aci_signal_ns =
-        prof.aci_signal_ns.load();
- 
-    t.wg_scheduling_ns =
-        timings_clamp0(
-            t.quorum_wait_ns
-            - t.post_rpc_ns
-            - t.commit_wait_ns);
 }
 
 } /* namespace nvmeof_raft */

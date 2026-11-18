@@ -177,6 +177,54 @@ storage/raft_blockcopy_server.h
 
 ---
 
+## 계측 스위치 RAFT_TIMING (2026-11-18)
+
+apply-timed 분해(LHandler … StorageIO, SRead/SWrite/SSync)를 만드는 구간 타이머를
+컴파일 때 켜고 끈다. **기본은 켜짐**이라 그냥 빌드하면 예전과 같다.
+
+```
+RAFT_TIMING=0 ./build.sh node        # compute node 3대 (끄기)
+RAFT_TIMING=0 ./build.sh client
+RAFT_TIMING=0 ./build.sh blockcopy-server   # storage node
+```
+
+CMake 는 `-DRAFT_TIMING=OFF`. build.sh 는 시작할 때 `[build.sh] RAFT_TIMING=0 (... off)` 를
+찍고, 0/1 이 아니면 거부한다.
+
+- **끈 빌드에서 남는 지연값**: apply-timed 의 `Total` 과 plain apply 의 `latency_nanos`
+  뿐이다. 나머지 분해 항은 0, residual = Total 이 된다 (`apply_latency_sweep.sh` 의
+  "항이 0" 경고는 이때 정상).
+- **끈 빌드의 storage node**: WritePBABatch 응답의 read/write/sync/copy nanos 가 0이다.
+  `raft_blkcopy_scale` 는 wall / 처리량만 의미가 있다.
+- **노드 3대와 storage node 를 같은 값으로 빌드할 것.** 섞으면 일부 항만 0이 된다.
+- 계측 비용은 요청당 시계 읽기 약 20회 × 43~58ns ≈ 1µs (eternity4/5/6, TSC) 정도라,
+  켠 빌드의 plain apply 도 거의 깨끗하다. 끈 빌드는 그 1µs 까지 뺀 기준선이 필요할 때 쓴다.
+- 기본값 정의는 `core/include/raft_basics.h` 와 `storage/raft_blockcopy_server.cpp` 두 곳
+  (storage/ 는 core/ 를 include 하지 않는다). 바꿀 때 둘 다 바꿀 것.
+
+## proto 변경 후 재빌드 (2026-11-18)
+
+`proto/rpcproto.proto` 에서 Mutex/CommitWait/handle_ae_* 필드를 지우고 번호를 `reserved`
+로 막았다 (`rpcproto.pb.{h,cc}` 재생성 완료). **compute node 3대 node/client 와 storage
+node 를 모두 다시 빌드해야 한다** -- 옛 바이너리와 섞어 쓰지 말 것. `-profile` 인자도
+없어졌으니 옛 실행 명령에서 지울 것 (`start_node.sh` 는 반영됨).
+
+## CMake 빌드 주의
+
+`build.sh` 는 `-luring` 을 링크하지만 `CMakeLists.txt` 는 아직 아니다 (io_uring 도입
+6bf3b1c 이후). CMake 로 검증 빌드할 때는 임시로:
+
+```
+cmake -S . -B /tmp/raftof-cmake -DCMAKE_CXX_STANDARD_LIBRARIES=-luring
+cmake --build /tmp/raftof-cmake -j8
+cd /tmp/raftof-cmake && ctest
+```
+
+/home 이 NFS 라 편집한 호스트와 빌드 호스트가 다르면 mtime 차이로 make 가 바뀐 파일을
+다시 컴파일하지 않을 수 있다. 의심되면 빌드 호스트에서 그 파일을 `touch` 할 것.
+
+---
+
 # 5. 사용하는 스크립트
 
 현재 주요 스크립트:
@@ -947,8 +995,6 @@ FHandler
 ReplNet
 StorageIO
 QuorumWait
-Mutex
-CommitWait
 residual
 ```
 

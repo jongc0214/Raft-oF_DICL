@@ -316,7 +316,6 @@ sudo "${LIB_PREFIX[@]}" "${NUMA_PREFIX[@]}" stdbuf -oL -eL "$NODE_BIN" \
     -ae-batch 256 \
     -gc-max-reqs 64 \
     -gc-max-bytes "$MAX_GC_BYTES" \
-    -profile \
     -sm noop \
     "${EXTRA_ARR[@]}" \
     > "$RUN_LOG" 2>&1 &

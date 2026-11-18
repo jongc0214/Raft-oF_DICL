@@ -163,7 +163,6 @@ int main(int argc, char **argv) {
     std::string push_cpus_str;
     uint64_t ring_pages = DEFAULT_NUM_PAGES;
     bool precondition_ring = false;
-    bool profile = false;
     std::string sm_kind = "noop";
     bool debug = false;
     int loop_sleep_us = 200;
@@ -197,8 +196,6 @@ int main(int argc, char **argv) {
             ring_pages = std::strtoull(next_arg_value(argc, argv, i, "-ring-pages").c_str(), nullptr, 10);
         } else if (arg == "-precondition-ring") {
             precondition_ring = true; 
-        } else if (arg == "-profile") {
-            profile = true;
         } else if (arg == "-sm") {
             sm_kind = next_arg_value(argc, argv, i, "-sm");
         } else if (arg == "-debug") {
@@ -295,7 +292,6 @@ int main(int argc, char **argv) {
         std::fprintf(stderr, "unknown -sm %s (hash|noop)\n", sm_kind.c_str());
         return 2;
     }
-    server->prof.enabled.store(profile ? 1 : 0);
 
     if (mode == "leader") {
         server->replication_mode = Server::ReplicationMode::LeaderSide;

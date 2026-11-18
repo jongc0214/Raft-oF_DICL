@@ -6,9 +6,9 @@
  *            + StorageIO + QuorumWait
  *
  * 파생 공식을 펼치면 우변은 정확히 telescope된다:
- *   a_held + (ae_rt - r2) + (r2 - write_pba) + (write_pba - storage)
+ *   pre_repl + (ae_rt - r2) + (r2 - write_pba) + (write_pba - storage)
  *          + storage + (replicate - ae_rt)
- *   = a_held_ns + replicate_ns
+ *   = pre_repl_ns + replicate_ns
  *
  * 즉 클램프가 걸리지 않는 입력(storage <= write_pba <= r2 <= ae_rt <=
  * replicate)에서는 **오차 0으로 성립해야 한다.** 실측의 1.3%는 Total을
@@ -30,19 +30,14 @@ ReplSample ordered_sample() {
     s.write_pba_rt_ns   = 380'600;   /* + F<->S RPC */
     s.r2_ns             = 385'200;   /* + 팔로워 핸들러 부기 */
     s.ae_rt_ns          = 510'800;   /* + L<->F 전송 */
-    s.mutex_ns          = 1'200;
-    s.mutex_c_ns        = 400;
-    s.post_rpc_wall_ns  = 5'000;
     return s;
 }
 
 ApplyWalls ordered_walls() {
     ApplyWalls w;
     w.nvme_ns         = 1'650'300;   /* O_DIRECT write + fdatasync */
-    w.a_held_ns       = 1'658'900;   /* Lock A 보유 (nvme 포함) */
+    w.pre_repl_ns     = 1'658'900;   /* apply 진입 -> AE 발사 (nvme 포함) */
     w.replicate_ns    = 872'900;     /* 리더 -> 쿼럼 전체 */
-    w.mutex_a_ns      = 1'200;
-    w.commit_wait_ns  = 784'200;
     return w;
 }
 
@@ -53,7 +48,7 @@ int64_t identity_rhs(const ApplyTimings &t) {
 
 }  /* anonymous namespace */
 
-TEST_CASE("항등식 우변이 a_held + replicate 로 정확히 telescope된다") {
+TEST_CASE("항등식 우변이 pre_repl + replicate 로 정확히 telescope된다") {
     ApplyWalls w = ordered_walls();
     ReplSink sink;
     sink.push(ordered_sample());
@@ -63,7 +58,7 @@ TEST_CASE("항등식 우변이 a_held + replicate 로 정확히 telescope된다"
     derive_apply_timings(w, &sink, prof, t);
 
     /* 클램프가 걸리지 않는 입력이므로 오차 0 */
-    CHECK(identity_rhs(t) == w.a_held_ns + w.replicate_ns);
+    CHECK(identity_rhs(t) == w.pre_repl_ns + w.replicate_ns);
 }
 
 TEST_CASE("각 구간이 공식대로 계산된다") {
@@ -77,15 +72,12 @@ TEST_CASE("각 구간이 공식대로 계산된다") {
     derive_apply_timings(w, &sink, prof, t);
 
     CHECK(t.l_persist_ns == w.nvme_ns);
-    CHECK(t.l_handler_ns == w.a_held_ns - w.nvme_ns);
+    CHECK(t.l_handler_ns == w.pre_repl_ns - w.nvme_ns);
     CHECK(t.ae_net_ns == smp.ae_rt_ns - smp.r2_ns);
     CHECK(t.f_handler_ns == smp.r2_ns - smp.write_pba_rt_ns);
     CHECK(t.repl_net_ns == smp.write_pba_rt_ns - smp.storage_copy_ns);
     CHECK(t.storage_io_ns == smp.storage_copy_ns);
     CHECK(t.quorum_wait_ns == w.replicate_ns - smp.ae_rt_ns);
-    CHECK(t.replicate_ns == w.replicate_ns);
-    CHECK(t.commit_wait_ns == w.commit_wait_ns);
-    CHECK(t.pure_commit_wait_ns == w.commit_wait_ns);
 }
 
 TEST_CASE("StorageIO 의 pread / pwrite 분리값은 그대로 실리고 항등식에 안 들어간다") {
@@ -103,7 +95,7 @@ TEST_CASE("StorageIO 의 pread / pwrite 분리값은 그대로 실리고 항등�
     CHECK(t.storage_read_ns == 25'000);
     CHECK(t.storage_write_ns == 17'000);
     CHECK(t.storage_io_ns == smp.storage_copy_ns);
-    CHECK(identity_rhs(t) == w.a_held_ns + w.replicate_ns);
+    CHECK(identity_rhs(t) == w.pre_repl_ns + w.replicate_ns);
 }
 
 TEST_CASE("샘플이 없으면 pread / pwrite 분리값도 폴백에서 읽는다") {
@@ -122,60 +114,19 @@ TEST_CASE("샘플이 없으면 pread / pwrite 분리값도 폴백에서 읽는�
     CHECK(t.storage_write_ns == 22'000);
 }
 
-TEST_CASE("보정값과 파생 서브스테이지") {
-    ApplyWalls w = ordered_walls();
-    ReplSample smp = ordered_sample();
-    ReplSink sink;
-    sink.push(smp);
-    ProfilingSink prof;
-    ApplyTimings t;
-
-    derive_apply_timings(w, &sink, prof, t);
-
-    /* 샘플의 mutex_ns가 0이 아니면 Lock A 대기값을 덮어쓴다 */
-    CHECK(t.mutex_ns == smp.mutex_ns);
-    CHECK(t.mutex_c_ns == smp.mutex_c_ns);
-    CHECK(t.wait_lock_ab_ns == smp.mutex_ns - smp.mutex_c_ns);
-
-    CHECK(t.replicate_corrected_ns == w.replicate_ns - smp.mutex_ns);
-    CHECK(t.quorum_wait_corrected_ns ==
-          (w.replicate_ns - smp.mutex_ns) - smp.ae_rt_ns);
-    CHECK(t.post_rpc_ns == smp.post_rpc_wall_ns);
-    CHECK(t.wg_scheduling_ns ==
-          timings_clamp0(t.quorum_wait_ns - t.post_rpc_ns - t.commit_wait_ns));
-}
-
-TEST_CASE("샘플의 mutex_ns가 0이면 Lock A 대기값을 유지한다") {
-    ApplyWalls w = ordered_walls();
-    ReplSample smp = ordered_sample();
-    smp.mutex_ns = 0;
-    ReplSink sink;
-    sink.push(smp);
-    ProfilingSink prof;
-    ApplyTimings t;
-
-    derive_apply_timings(w, &sink, prof, t);
-    CHECK(t.mutex_ns == w.mutex_a_ns);
-}
-
 TEST_CASE("모든 파생 항이 음수가 되지 않는다 (clamp0)") {
     /* 일관성 없는 입력: 팔로워 핸들러가 리더가 잰 왕복보다 길게 나오는 등
      * 클럭 해상도 때문에 실제로 관측되는 상황이다. */
     ApplyWalls w;
     w.nvme_ns = 5'000;
-    w.a_held_ns = 1'000;        /* nvme보다 작다 -> l_handler가 음수여야 하는 입력 */
+    w.pre_repl_ns = 1'000;        /* nvme보다 작다 -> l_handler가 음수여야 하는 입력 */
     w.replicate_ns = 5;         /* ae_rt(10)보다 작다 -> quorum_wait가 음수여야 하는 입력 */
-    w.mutex_a_ns = 0;
-    w.commit_wait_ns = 99'999;  /* quorum_wait보다 크다 */
 
     ReplSample smp;
     smp.ae_rt_ns = 10;
     smp.r2_ns = 500;            /* ae_rt보다 크다 */
     smp.write_pba_rt_ns = 900;  /* r2보다 크다 */
     smp.storage_copy_ns = 5'000;/* write_pba보다 크다 */
-    smp.post_rpc_wall_ns = 12'345;
-    smp.mutex_c_ns = 7'777;
-    smp.mutex_ns = 1;
 
     ReplSink sink;
     sink.push(smp);
@@ -189,36 +140,6 @@ TEST_CASE("모든 파생 항이 음수가 되지 않는다 (clamp0)") {
     CHECK(t.f_handler_ns == 0);
     CHECK(t.repl_net_ns == 0);
     CHECK(t.quorum_wait_ns == 0);
-    CHECK(t.wait_lock_ab_ns == 0);
-    CHECK(t.replicate_corrected_ns >= 0);
-    CHECK(t.quorum_wait_corrected_ns == 0);
-    CHECK(t.wg_scheduling_ns == 0);
-}
-
-TEST_CASE("advance_commit_index 서브스테이지는 ProfilingSink에서 온다") {
-    ApplyWalls w = ordered_walls();
-    ReplSink sink;
-    sink.push(ordered_sample());
-
-    ProfilingSink prof;
-    prof.aci_lock_wait_ns.store(11);
-    prof.aci_quorum_ns.store(22);
-    prof.aci_slot_gc_ns.store(33);
-    prof.aci_apply_loop_ns.store(44);
-    prof.aci_sort_ns.store(55);
-    prof.aci_backpres_ns.store(66);
-    prof.aci_signal_ns.store(77);
-
-    ApplyTimings t;
-    derive_apply_timings(w, &sink, prof, t);
-
-    CHECK(t.aci_lock_wait_ns == 11);
-    CHECK(t.aci_quorum_ns == 22);
-    CHECK(t.aci_slot_gc_ns == 33);
-    CHECK(t.aci_apply_loop_ns == 44);
-    CHECK(t.aci_sort_ns == 55);
-    CHECK(t.aci_backpres_ns == 66);
-    CHECK(t.aci_signal_ns == 77);
 }
 
 TEST_CASE("샘플이 없으면 ProfilingSink의 폴백 값을 읽는다") {
@@ -233,17 +154,14 @@ TEST_CASE("샘플이 없으면 ProfilingSink의 폴백 값을 읽는다") {
     prof.sample_r2_ns.store(385'200);
     prof.sample_write_pba_rt_ns.store(380'600);
     prof.sample_storage_copy_ns.store(186'600);
-    prof.sample_mutex_ns.store(1'200);
-    prof.sample_mutex_c_ns.store(400);
 
     ApplyTimings t;
     derive_apply_timings(w, &empty_sink, prof, t);
 
     CHECK(t.ae_net_ns == 510'800 - 385'200);
     CHECK(t.storage_io_ns == 186'600);
-    CHECK(t.mutex_ns == 1'200);
     /* 폴백 경로에서도 항등식은 성립한다 */
-    CHECK(identity_rhs(t) == w.a_held_ns + w.replicate_ns);
+    CHECK(identity_rhs(t) == w.pre_repl_ns + w.replicate_ns);
 }
 
 TEST_CASE("샘플도 폴백도 없으면 전송 구간이 전부 0이 된다") {
@@ -261,5 +179,5 @@ TEST_CASE("샘플도 폴백도 없으면 전송 구간이 전부 0이 된다") {
     /* QuorumWait이 replicate 전체를 흡수한다 -- 실제 노드에서 관측되는
      * "QuorumWait=0.0 Mutex=1656.8" 행의 반대 극단이다 */
     CHECK(t.quorum_wait_ns == w.replicate_ns);
-    CHECK(identity_rhs(t) == w.a_held_ns + w.replicate_ns);
+    CHECK(identity_rhs(t) == w.pre_repl_ns + w.replicate_ns);
 }

@@ -412,7 +412,11 @@ TEST_CASE("persist_prepare_locked + persist_io: persist_circular와 같은 바�
     }
     CHECK(aligned);
     CHECK(bytes_sum == new_path.s->ring.run_buf.size());
+#if RAFT_TIMING   /* 끈 빌드에서는 persist_io 가 시간을 재지 않아 0을 돌려준다 */
     CHECK(new_path.s->persist_io(plan) > 0);
+#else
+    new_path.s->persist_io(plan);
+#endif
 
     check_same(old_path, new_path);
 }

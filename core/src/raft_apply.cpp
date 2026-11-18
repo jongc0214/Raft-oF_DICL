@@ -81,11 +81,10 @@ struct GcReq {
     std::string error;
     
     int64_t nvme_ns = 0;      // 대표가 채움 (묶음 전체의 persist 시간)
-    int64_t a_held_ns = 0;    // 대표가 채움
 };
 
 static void commit_batch_locked(Server *s, std::unique_lock<std::mutex> &lk, 
-                                std::vector<GcReq *> &batch, clock_type::time_point t_a_held,
+                                std::vector<GcReq *> &batch,
                                 const std::shared_ptr<ReplSink> &sink) {
     auto fail = [&](const std::string &err, bool busy) {
         for (GcReq *r : batch) { 
@@ -209,7 +208,6 @@ static void commit_batch_locked(Server *s, std::unique_lock<std::mutex> &lk,
     };
 
     int64_t nvme_ns = 0;
-    int64_t unlocked_ns = 0;      /* mu를 놓고 있던 시간 ([LOCKA]의 mu util 계산용) */
     if (!s->persist_needs_header()) {
         /* [B'] 빠른 경로: 슬롯 할당과 인코딩은 mu 안, 디스크 I/O(pwrite + fdatasync)는 mu 밖.
          * persist_inflight가 true인 동안 AE 빌더와 리더 자신의 match는 durable_floor까지만 본다. */
@@ -223,7 +221,6 @@ static void commit_batch_locked(Server *s, std::unique_lock<std::mutex> &lk,
             io_err = e.what();
         }
         if (io_err.empty()) {
-            auto t_unlock = clock_type::now();
             lk.unlock();
             try {
                 nvme_ns = s->persist_io(plan);
@@ -231,7 +228,6 @@ static void commit_batch_locked(Server *s, std::unique_lock<std::mutex> &lk,
                 io_err = e.what();
             }
             lk.lock();
-            unlocked_ns = elapsed_ns(t_unlock);
         }
         s->persist_inflight = false;
         s->persist_cv.notify_all();
@@ -251,32 +247,9 @@ static void commit_batch_locked(Server *s, std::unique_lock<std::mutex> &lk,
         }
     }
 
-    const int64_t a_held_ns = elapsed_ns(t_a_held);
     for (GcReq *r : batch) { 
         r->nvme_ns = nvme_ns;
-        r->a_held_ns = a_held_ns;
         // r->done = true;
-    }
-
-    static uint64_t g_batches = 0, g_reqs = 0, g_entries = 0;
-    static int64_t  g_held_ns = 0, g_persist_ns = 0, g_unlocked_ns = 0;
-    static auto     g_t0 = clock_type::now();
-    g_batches++; g_reqs += batch.size(); g_entries += total_n;
-    g_held_ns += a_held_ns; g_persist_ns += nvme_ns; g_unlocked_ns += unlocked_ns;
-    {
-        auto now = clock_type::now();
-        int64_t el = std::chrono::duration_cast<std::chrono::nanoseconds>(now - g_t0).count();
-        if (el >= 5'000'000'000LL) {
-            std::fprintf(stderr,
-                "[LOCKA] batches/s=%.0f entries/batch=%.1f reqs/batch=%.1f "
-                "held/batch=%.0fus persist/batch=%.0fus mu/batch=%.0fus mu/entry=%.1fus util=%.0f%%\n",
-                g_batches * 1e9 / el, (double)g_entries / g_batches, (double)g_reqs / g_batches,
-                g_held_ns / 1e3 / g_batches, g_persist_ns / 1e3 / g_batches,
-                (g_held_ns - g_unlocked_ns) / 1e3 / g_batches,
-                (g_held_ns - g_unlocked_ns) / 1e3 / g_entries,
-                100.0 * (g_held_ns - g_unlocked_ns) / el);
-            g_batches = g_reqs = g_entries = 0; g_held_ns = g_persist_ns = g_unlocked_ns = 0; g_t0 = now;
-        }
     }
 }
 
@@ -318,6 +291,11 @@ static ApplyResult apply_internal(Server *s,
                                    std::vector<std::vector<uint8_t>> &commands,
                                    ApplyTimings *timings,
                                    bool *out_busy) {
+#if RAFT_TIMING
+    /* LHandler의 시작점: AE를 보내기 전까지(t_repl) 리더가 쓴 시간 전부 --
+     * 그룹 커밋 큐 대기, mu 대기, 부기, persist -- 를 이 시각부터 잰다. */
+    const auto t_enter = clock_type::now();
+#endif
     ApplyResult out;
     if (out_busy != nullptr) {
         *out_busy = false;
@@ -327,11 +305,16 @@ static ApplyResult apply_internal(Server *s,
     }
 
     /* ReplSink는 timed 경로에서만 할당 (원본: "non-timed Apply passes
-     * nil and goroutines skip the push") */
+     * nil and goroutines skip the push"). RAFT_TIMING=0이면 항상 nullptr --
+     * 분해에 쓸 샘플이 없으므로 할당도 하지 않는다. */
     /* [수정-7] ReplSink는 반드시 힙에 둔다 (스택에 두면 AE 워커가 죽은
      * 프레임을 건드린다) -- DECISIONS.md D7 */
+#if RAFT_TIMING
     std::shared_ptr<ReplSink> sink =
         (timings != nullptr) ? std::make_shared<ReplSink>(s->raft.cluster.size() - 1) : nullptr;
+#else
+    std::shared_ptr<ReplSink> sink;
+#endif
 
     auto collector = std::make_shared<ApplyCollector>();
     std::shared_ptr<EntryCommitSignal> last_signal;
@@ -343,7 +326,6 @@ static ApplyResult apply_internal(Server *s,
     req.commands = &commands;
     req.collector = collector;
 
-    auto t_lock_a = clock_type::now();
     bool is_rep = false;
     {
         std::lock_guard<std::mutex> gcl(s->gc_mu);
@@ -364,11 +346,8 @@ static ApplyResult apply_internal(Server *s,
 
     /* ---- Lock A ---- */
     // [Group Commit]
-    int64_t mutex_a = 0;
     if (is_rep) {
         std::unique_lock<std::mutex> lk(s->mu);
-        mutex_a = elapsed_ns(t_lock_a);
-        auto t_a_held = clock_type::now();
 
         std::vector<GcReq *> batch;
         batch.push_back(&req);
@@ -400,7 +379,7 @@ static ApplyResult apply_internal(Server *s,
             }
         }
         try {
-            commit_batch_locked(s, lk, batch, t_a_held, sink);
+            commit_batch_locked(s, lk, batch, sink);
         } catch (const std::exception &e) {
             for (GcReq *r : batch) {
                 if (r->error.empty()) {
@@ -411,18 +390,14 @@ static ApplyResult apply_internal(Server *s,
         /* [Push Integration] push 대기의 기준점. mu 를 놓기 **전에** 남긴다. push 가 이
          * 시각 전에 끝났으면 대기는 0 이다. 묶음에 요청이 여러 개면 대표의 sink 에만
          * 기록된다 (C=1 측정에서는 요청 하나가 곧 대표다). */
+#if RAFT_TIMING
         if (sink != nullptr) {
             sink->set_repl_start(clock_type::now());
         }
+#endif
 
         lk.unlock();
         gc_publish(s, batch, &req);
-    } else {
-        mutex_a = elapsed_ns(t_lock_a);
-    }
-
-    if (sink != nullptr) {
-        sink->set_mutex_a(mutex_a);
     }
 
     if (!req.error.empty()) {
@@ -433,19 +408,22 @@ static ApplyResult apply_internal(Server *s,
         return out;
     }
     last_signal = req.last_signal;
+#if RAFT_TIMING
     const int64_t nvme_ns = req.nvme_ns;
-    const int64_t a_held_ns = req.a_held_ns;
+#endif
     // [Group Commit]
 
     /* ---- 복제 ---- */
+#if RAFT_TIMING
     auto t_repl = clock_type::now();
+    const int64_t pre_repl_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        t_repl - t_enter).count();
+#endif
     s->append_entries(sink);   /* shared_ptr 복사가 워커에게 전달된다 */
 
     s->io.cached_fd->fdatasync();   /* 리더의 로그 flush를 AppendEntries 뒤로 이동 */
 
-    int64_t commit_wait_ns = 0;
     {
-        auto t_cw = clock_type::now();
         /* 주의: last_signal->mu를 잡은 상태에서 s.mu를 잡으면 안 된다.
          * advance_commit_index는 s.mu를 잡은 채로 signal_committed()가
          * committed->mu를 잡으므로(s.mu -> committed->mu), 여기서
@@ -473,9 +451,10 @@ static ApplyResult apply_internal(Server *s,
                 return out;
             }
         }
-        commit_wait_ns = elapsed_ns(t_cw);
     }
+#if RAFT_TIMING
     int64_t replicate_ns = elapsed_ns(t_repl);
+#endif
 
     /* apply_pending이 상태머신에 반영하고 result_sink를 호출한다.
      * committed 신호는 advance_commit_index가, apply는 apply 워커가
@@ -498,6 +477,7 @@ static ApplyResult apply_internal(Server *s,
         }
     }
 
+#if RAFT_TIMING
     if (timings == nullptr) {
         return out;
     }
@@ -505,11 +485,12 @@ static ApplyResult apply_internal(Server *s,
     /* 항등식 계산은 순수 산술이므로 분리해 뒀다 (위 derive_apply_timings) */
     ApplyWalls walls;
     walls.nvme_ns = nvme_ns;
-    walls.a_held_ns = a_held_ns;
+    walls.pre_repl_ns = pre_repl_ns;
     walls.replicate_ns = replicate_ns;
-    walls.mutex_a_ns = mutex_a;
-    walls.commit_wait_ns = commit_wait_ns;
     derive_apply_timings(walls, sink.get(), s->prof, *timings);
+#else
+    (void)timings;   /* 분해 항은 0으로 남고, apply_timed가 Total만 채운다 */
+#endif
 
     return out;
 }

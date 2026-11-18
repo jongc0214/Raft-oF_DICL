@@ -66,7 +66,7 @@
 # 마찬가지로 내용은 상수다.
 #
 # **(3) 서버는 -breakdown=true 로 떠 있다** (run_block_node.sh). raftof 의
-# -profile 과 같은 종류의 계측 오버헤드가 양쪽에 다 있다.
+# apply-timed 와 같은 종류의 계측 오버헤드가 양쪽에 다 있다.
 #
 # **(4) 실행 호스트:** block_client 바이너리가 있는 곳 (BLOCK_BUILD_DIR, NFS). 실행은 로컬 사본
 #   (LOCAL_CLIENT=1, /var/tmp/raftof-<user>/bin) 으로 한다.

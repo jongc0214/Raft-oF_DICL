@@ -79,17 +79,10 @@ message AppendEntriesResponse {
   int64 write_pba_rt_nanos = 6;
   // Storage-reported pread + pwrite duration on the storage server.
   int64 storage_copy_nanos = 7;
-  // HandleAppendEntriesRequest follower sub-stages. The follower already
-  // measures these into AppendEntriesResponse (see raft_entry.h), but they
-  // had no wire fields, so ReplSample.handle_ae_* on the leader was always
-  // zero — the follower-internal breakdown never reached the leader.
-  // Additive field numbers, so this stays wire-compatible with peers that
-  // predate them (they simply report 0).
-  int64 handle_ae_lock_wait_nanos = 8;   // entry -> mu.Lock() acquired
-  int64 handle_ae_pre_nanos = 9;         // after lock -> unlock before doPBACopy
-  int64 handle_ae_lock_wait2_nanos = 10; // doPBACopy returned -> re-lock acquired
-  int64 handle_ae_post_nanos = 11;       // re-lock -> return, excluding persist
-  int64 handle_ae_persist_nanos = 12;    // persistCircular (header-only)
+  // 8-12 were the follower handler sub-stages (handle_ae_*), removed 2026-11-18.
+  reserved 8 to 12;
+  reserved "handle_ae_lock_wait_nanos", "handle_ae_pre_nanos", "handle_ae_lock_wait2_nanos",
+           "handle_ae_post_nanos", "handle_ae_persist_nanos";
   // Push mode (DECISIONS.md D20): the follower's ring extent-map hash when it
   // runs with -mode push, 0 otherwise. Sent on every response, success or not.
   // Additive, so peers that predate it report 0 (= not a push follower).
@@ -171,19 +164,17 @@ message ClientApplyTimedResponse {
   int64 repl_net_nanos = 6;
   int64 replication_nanos = 7;
   int64 quorum_wait_nanos = 8;
-  int64 mutex_nanos = 9;
   int64 total_nanos = 10;
   bool busy = 11;
   int32 retry_after_ms = 12;
-  int64 post_rpc_nanos = 13;
-  int64 commit_wait_nanos = 14;
-  int64 wg_scheduling_nanos = 15;
-  int64 mutex_a_nanos = 16;
-  int64 mutex_b_nanos = 17;
-  int64 mutex_c_nanos = 18;
+  // 9 and 13-18 were Mutex / PostRPC / CommitWait / WgScheduling / MutexA-C,
+  // removed 2026-11-18.
+  reserved 9, 13 to 18;
+  reserved "mutex_nanos", "post_rpc_nanos", "commit_wait_nanos", "wg_scheduling_nanos",
+           "mutex_a_nanos", "mutex_b_nanos", "mutex_c_nanos";
   // replication_nanos (StorageIO) split into the storage server's pread /
   // pwrite sums. Diagnostic only, not part of the identity. 0 for pushed batches.
-  // (Branch jongc used 16/17 here; those are mutex_a/b on this branch.)
+  // (Branch jongc used 16/17 here; those were mutex_a/b on this branch, now reserved.)
   int64 storage_read_nanos = 19;
   int64 storage_write_nanos = 20;
   // StorageIO's fdatasync part. Diagnostic only, 0 for pushed batches.

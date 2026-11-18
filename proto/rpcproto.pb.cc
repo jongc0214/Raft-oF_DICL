@@ -118,11 +118,6 @@ PROTOBUF_CONSTEXPR AppendEntriesResponse::AppendEntriesResponse(
   , /*decltype(_impl_.handler_duration_nanos_)*/int64_t{0}
   , /*decltype(_impl_.write_pba_rt_nanos_)*/int64_t{0}
   , /*decltype(_impl_.storage_copy_nanos_)*/int64_t{0}
-  , /*decltype(_impl_.handle_ae_lock_wait_nanos_)*/int64_t{0}
-  , /*decltype(_impl_.handle_ae_pre_nanos_)*/int64_t{0}
-  , /*decltype(_impl_.handle_ae_lock_wait2_nanos_)*/int64_t{0}
-  , /*decltype(_impl_.handle_ae_post_nanos_)*/int64_t{0}
-  , /*decltype(_impl_.handle_ae_persist_nanos_)*/int64_t{0}
   , /*decltype(_impl_.push_map_hash_)*/uint64_t{0u}
   , /*decltype(_impl_.storage_read_nanos_)*/int64_t{0}
   , /*decltype(_impl_.storage_write_nanos_)*/int64_t{0}
@@ -228,16 +223,9 @@ PROTOBUF_CONSTEXPR ClientApplyTimedResponse::ClientApplyTimedResponse(
   , /*decltype(_impl_.repl_net_nanos_)*/int64_t{0}
   , /*decltype(_impl_.replication_nanos_)*/int64_t{0}
   , /*decltype(_impl_.quorum_wait_nanos_)*/int64_t{0}
-  , /*decltype(_impl_.mutex_nanos_)*/int64_t{0}
   , /*decltype(_impl_.total_nanos_)*/int64_t{0}
   , /*decltype(_impl_.busy_)*/false
   , /*decltype(_impl_.retry_after_ms_)*/0
-  , /*decltype(_impl_.post_rpc_nanos_)*/int64_t{0}
-  , /*decltype(_impl_.commit_wait_nanos_)*/int64_t{0}
-  , /*decltype(_impl_.wg_scheduling_nanos_)*/int64_t{0}
-  , /*decltype(_impl_.mutex_a_nanos_)*/int64_t{0}
-  , /*decltype(_impl_.mutex_b_nanos_)*/int64_t{0}
-  , /*decltype(_impl_.mutex_c_nanos_)*/int64_t{0}
   , /*decltype(_impl_.storage_read_nanos_)*/int64_t{0}
   , /*decltype(_impl_.storage_write_nanos_)*/int64_t{0}
   , /*decltype(_impl_.storage_sync_nanos_)*/int64_t{0}
@@ -432,11 +420,6 @@ const uint32_t TableStruct_rpcproto_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE
   PROTOBUF_FIELD_OFFSET(::rpcproto::AppendEntriesResponse, _impl_.handler_duration_nanos_),
   PROTOBUF_FIELD_OFFSET(::rpcproto::AppendEntriesResponse, _impl_.write_pba_rt_nanos_),
   PROTOBUF_FIELD_OFFSET(::rpcproto::AppendEntriesResponse, _impl_.storage_copy_nanos_),
-  PROTOBUF_FIELD_OFFSET(::rpcproto::AppendEntriesResponse, _impl_.handle_ae_lock_wait_nanos_),
-  PROTOBUF_FIELD_OFFSET(::rpcproto::AppendEntriesResponse, _impl_.handle_ae_pre_nanos_),
-  PROTOBUF_FIELD_OFFSET(::rpcproto::AppendEntriesResponse, _impl_.handle_ae_lock_wait2_nanos_),
-  PROTOBUF_FIELD_OFFSET(::rpcproto::AppendEntriesResponse, _impl_.handle_ae_post_nanos_),
-  PROTOBUF_FIELD_OFFSET(::rpcproto::AppendEntriesResponse, _impl_.handle_ae_persist_nanos_),
   PROTOBUF_FIELD_OFFSET(::rpcproto::AppendEntriesResponse, _impl_.push_map_hash_),
   PROTOBUF_FIELD_OFFSET(::rpcproto::AppendEntriesResponse, _impl_.extent_map_),
   PROTOBUF_FIELD_OFFSET(::rpcproto::AppendEntriesResponse, _impl_.volume_wwid_),
@@ -504,16 +487,9 @@ const uint32_t TableStruct_rpcproto_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE
   PROTOBUF_FIELD_OFFSET(::rpcproto::ClientApplyTimedResponse, _impl_.repl_net_nanos_),
   PROTOBUF_FIELD_OFFSET(::rpcproto::ClientApplyTimedResponse, _impl_.replication_nanos_),
   PROTOBUF_FIELD_OFFSET(::rpcproto::ClientApplyTimedResponse, _impl_.quorum_wait_nanos_),
-  PROTOBUF_FIELD_OFFSET(::rpcproto::ClientApplyTimedResponse, _impl_.mutex_nanos_),
   PROTOBUF_FIELD_OFFSET(::rpcproto::ClientApplyTimedResponse, _impl_.total_nanos_),
   PROTOBUF_FIELD_OFFSET(::rpcproto::ClientApplyTimedResponse, _impl_.busy_),
   PROTOBUF_FIELD_OFFSET(::rpcproto::ClientApplyTimedResponse, _impl_.retry_after_ms_),
-  PROTOBUF_FIELD_OFFSET(::rpcproto::ClientApplyTimedResponse, _impl_.post_rpc_nanos_),
-  PROTOBUF_FIELD_OFFSET(::rpcproto::ClientApplyTimedResponse, _impl_.commit_wait_nanos_),
-  PROTOBUF_FIELD_OFFSET(::rpcproto::ClientApplyTimedResponse, _impl_.wg_scheduling_nanos_),
-  PROTOBUF_FIELD_OFFSET(::rpcproto::ClientApplyTimedResponse, _impl_.mutex_a_nanos_),
-  PROTOBUF_FIELD_OFFSET(::rpcproto::ClientApplyTimedResponse, _impl_.mutex_b_nanos_),
-  PROTOBUF_FIELD_OFFSET(::rpcproto::ClientApplyTimedResponse, _impl_.mutex_c_nanos_),
   PROTOBUF_FIELD_OFFSET(::rpcproto::ClientApplyTimedResponse, _impl_.storage_read_nanos_),
   PROTOBUF_FIELD_OFFSET(::rpcproto::ClientApplyTimedResponse, _impl_.storage_write_nanos_),
   PROTOBUF_FIELD_OFFSET(::rpcproto::ClientApplyTimedResponse, _impl_.storage_sync_nanos_),
@@ -584,20 +560,20 @@ static const ::_pbi::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protode
   { 28, -1, -1, sizeof(::rpcproto::RequestVoteResponse)},
   { 36, -1, -1, sizeof(::rpcproto::AppendEntriesRequest)},
   { 57, -1, -1, sizeof(::rpcproto::AppendEntriesResponse)},
-  { 81, -1, -1, sizeof(::rpcproto::WritePBABatchRequest)},
-  { 93, -1, -1, sizeof(::rpcproto::WritePBABatchResponse)},
-  { 104, -1, -1, sizeof(::rpcproto::ClientApplyRequest)},
-  { 111, -1, -1, sizeof(::rpcproto::ClientApplyResponse)},
-  { 121, -1, -1, sizeof(::rpcproto::ClientApplyTimedRequest)},
-  { 128, -1, -1, sizeof(::rpcproto::ClientApplyTimedResponse)},
-  { 155, -1, -1, sizeof(::rpcproto::ClientEchoRequest)},
-  { 162, -1, -1, sizeof(::rpcproto::ClientEchoResponse)},
-  { 169, -1, -1, sizeof(::rpcproto::ClientGetCommitIndexRequest)},
-  { 175, -1, -1, sizeof(::rpcproto::ClientGetCommitIndexResponse)},
-  { 183, -1, -1, sizeof(::rpcproto::ClientGetHashRequest)},
-  { 190, -1, -1, sizeof(::rpcproto::ClientGetHashResponse)},
-  { 199, -1, -1, sizeof(::rpcproto::ClientGetAEBatchStatsRequest)},
-  { 205, -1, -1, sizeof(::rpcproto::ClientGetAEBatchStatsResponse)},
+  { 76, -1, -1, sizeof(::rpcproto::WritePBABatchRequest)},
+  { 88, -1, -1, sizeof(::rpcproto::WritePBABatchResponse)},
+  { 99, -1, -1, sizeof(::rpcproto::ClientApplyRequest)},
+  { 106, -1, -1, sizeof(::rpcproto::ClientApplyResponse)},
+  { 116, -1, -1, sizeof(::rpcproto::ClientApplyTimedRequest)},
+  { 123, -1, -1, sizeof(::rpcproto::ClientApplyTimedResponse)},
+  { 143, -1, -1, sizeof(::rpcproto::ClientEchoRequest)},
+  { 150, -1, -1, sizeof(::rpcproto::ClientEchoResponse)},
+  { 157, -1, -1, sizeof(::rpcproto::ClientGetCommitIndexRequest)},
+  { 163, -1, -1, sizeof(::rpcproto::ClientGetCommitIndexResponse)},
+  { 171, -1, -1, sizeof(::rpcproto::ClientGetHashRequest)},
+  { 178, -1, -1, sizeof(::rpcproto::ClientGetHashResponse)},
+  { 187, -1, -1, sizeof(::rpcproto::ClientGetAEBatchStatsRequest)},
+  { 193, -1, -1, sizeof(::rpcproto::ClientGetAEBatchStatsResponse)},
 };
 
 static const ::_pb::Message* const file_default_instances[] = {
@@ -641,59 +617,57 @@ const char descriptor_table_protodef_rpcproto_2eproto[] PROTOBUF_SECTION_VARIABL
   "\022\030\n\020leader_dev_index\030\013 \001(\005\022\033\n\023data_alrea"
   "dy_copied\030\r \001(\010\022\027\n\017need_extent_map\030\016 \001(\010"
   "\022\026\n\016inline_entries\030\017 \001(\010\022(\n\013entry_metas\030"
-  "\014 \003(\0132\023.rpcproto.EntryMeta\"\213\004\n\025AppendEnt"
+  "\014 \003(\0132\023.rpcproto.EntryMeta\"\351\003\n\025AppendEnt"
   "riesResponse\022\014\n\004term\030\001 \001(\004\022\017\n\007success\030\002 "
   "\001(\010\022\025\n\rconflict_term\030\003 \001(\004\022\026\n\016conflict_i"
   "ndex\030\004 \001(\004\022\036\n\026handler_duration_nanos\030\005 \001"
   "(\003\022\032\n\022write_pba_rt_nanos\030\006 \001(\003\022\032\n\022storag"
-  "e_copy_nanos\030\007 \001(\003\022!\n\031handle_ae_lock_wai"
-  "t_nanos\030\010 \001(\003\022\033\n\023handle_ae_pre_nanos\030\t \001"
-  "(\003\022\"\n\032handle_ae_lock_wait2_nanos\030\n \001(\003\022\034"
-  "\n\024handle_ae_post_nanos\030\013 \001(\003\022\037\n\027handle_a"
-  "e_persist_nanos\030\014 \001(\003\022\025\n\rpush_map_hash\030\r"
-  " \001(\004\022(\n\nextent_map\030\016 \003(\0132\024.rpcproto.Ring"
-  "Extent\022\023\n\013volume_wwid\030\017 \001(\t\022\032\n\022storage_r"
-  "ead_nanos\030\020 \001(\003\022\033\n\023storage_write_nanos\030\021"
-  " \001(\003\022\032\n\022storage_sync_nanos\030\022 \001(\003\"\200\001\n\024Wri"
-  "tePBABatchRequest\022\020\n\010pba_srcs\030\001 \003(\004\022\020\n\010p"
-  "ba_dsts\030\002 \003(\004\022\016\n\006nbytes\030\003 \003(\004\022\022\n\nblock_s"
-  "ize\030\004 \001(\004\022\017\n\007src_dev\030\005 \001(\005\022\017\n\007dst_dev\030\006 "
-  "\001(\005\"u\n\025WritePBABatchResponse\022\013\n\003err\030\001 \001("
-  "\t\022\022\n\ncopy_nanos\030\002 \001(\003\022\022\n\nread_nanos\030\003 \001("
-  "\003\022\023\n\013write_nanos\030\004 \001(\003\022\022\n\nsync_nanos\030\005 \001"
-  "(\003\"&\n\022ClientApplyRequest\022\020\n\010commands\030\001 \003"
-  "(\014\"_\n\023ClientApplyResponse\022\013\n\003err\030\001 \001(\t\022\014"
-  "\n\004busy\030\002 \001(\010\022\026\n\016retry_after_ms\030\003 \001(\005\022\025\n\r"
-  "latency_nanos\030\004 \001(\003\"+\n\027ClientApplyTimedR"
-  "equest\022\020\n\010commands\030\001 \003(\014\"\220\004\n\030ClientApply"
-  "TimedResponse\022\013\n\003err\030\001 \001(\t\022\027\n\017l_handler_"
-  "nanos\030\002 \001(\003\022\027\n\017l_persist_nanos\030\003 \001(\003\022\024\n\014"
-  "ae_net_nanos\030\004 \001(\003\022\027\n\017f_handler_nanos\030\005 "
-  "\001(\003\022\026\n\016repl_net_nanos\030\006 \001(\003\022\031\n\021replicati"
-  "on_nanos\030\007 \001(\003\022\031\n\021quorum_wait_nanos\030\010 \001("
-  "\003\022\023\n\013mutex_nanos\030\t \001(\003\022\023\n\013total_nanos\030\n "
-  "\001(\003\022\014\n\004busy\030\013 \001(\010\022\026\n\016retry_after_ms\030\014 \001("
-  "\005\022\026\n\016post_rpc_nanos\030\r \001(\003\022\031\n\021commit_wait"
-  "_nanos\030\016 \001(\003\022\033\n\023wg_scheduling_nanos\030\017 \001("
-  "\003\022\025\n\rmutex_a_nanos\030\020 \001(\003\022\025\n\rmutex_b_nano"
-  "s\030\021 \001(\003\022\025\n\rmutex_c_nanos\030\022 \001(\003\022\032\n\022storag"
-  "e_read_nanos\030\023 \001(\003\022\033\n\023storage_write_nano"
-  "s\030\024 \001(\003\022\032\n\022storage_sync_nanos\030\025 \001(\003\"%\n\021C"
-  "lientEchoRequest\022\020\n\010commands\030\001 \003(\014\"\037\n\022Cl"
-  "ientEchoResponse\022\t\n\001n\030\001 \001(\003\"\035\n\033ClientGet"
-  "CommitIndexRequest\"A\n\034ClientGetCommitInd"
-  "exResponse\022\024\n\014commit_index\030\001 \001(\004\022\013\n\003err\030"
-  "\002 \001(\t\"(\n\024ClientGetHashRequest\022\020\n\010at_coun"
-  "t\030\001 \001(\004\"A\n\025ClientGetHashResponse\022\014\n\004hash"
-  "\030\001 \001(\t\022\r\n\005count\030\002 \001(\004\022\013\n\003err\030\003 \001(\t\"\036\n\034Cl"
-  "ientGetAEBatchStatsRequest\"R\n\035ClientGetA"
-  "EBatchStatsResponse\022\020\n\010ae_count\030\001 \001(\004\022\022\n"
-  "\nae_entries\030\002 \001(\004\022\013\n\003err\030\003 \001(\tB\026Z\024nvmeof"
-  "_raft/rpcprotob\006proto3"
+  "e_copy_nanos\030\007 \001(\003\022\025\n\rpush_map_hash\030\r \001("
+  "\004\022(\n\nextent_map\030\016 \003(\0132\024.rpcproto.RingExt"
+  "ent\022\023\n\013volume_wwid\030\017 \001(\t\022\032\n\022storage_read"
+  "_nanos\030\020 \001(\003\022\033\n\023storage_write_nanos\030\021 \001("
+  "\003\022\032\n\022storage_sync_nanos\030\022 \001(\003J\004\010\010\020\rR\031han"
+  "dle_ae_lock_wait_nanosR\023handle_ae_pre_na"
+  "nosR\032handle_ae_lock_wait2_nanosR\024handle_"
+  "ae_post_nanosR\027handle_ae_persist_nanos\"\200"
+  "\001\n\024WritePBABatchRequest\022\020\n\010pba_srcs\030\001 \003("
+  "\004\022\020\n\010pba_dsts\030\002 \003(\004\022\016\n\006nbytes\030\003 \003(\004\022\022\n\nb"
+  "lock_size\030\004 \001(\004\022\017\n\007src_dev\030\005 \001(\005\022\017\n\007dst_"
+  "dev\030\006 \001(\005\"u\n\025WritePBABatchResponse\022\013\n\003er"
+  "r\030\001 \001(\t\022\022\n\ncopy_nanos\030\002 \001(\003\022\022\n\nread_nano"
+  "s\030\003 \001(\003\022\023\n\013write_nanos\030\004 \001(\003\022\022\n\nsync_nan"
+  "os\030\005 \001(\003\"&\n\022ClientApplyRequest\022\020\n\010comman"
+  "ds\030\001 \003(\014\"_\n\023ClientApplyResponse\022\013\n\003err\030\001"
+  " \001(\t\022\014\n\004busy\030\002 \001(\010\022\026\n\016retry_after_ms\030\003 \001"
+  "(\005\022\025\n\rlatency_nanos\030\004 \001(\003\"+\n\027ClientApply"
+  "TimedRequest\022\020\n\010commands\030\001 \003(\014\"\344\003\n\030Clien"
+  "tApplyTimedResponse\022\013\n\003err\030\001 \001(\t\022\027\n\017l_ha"
+  "ndler_nanos\030\002 \001(\003\022\027\n\017l_persist_nanos\030\003 \001"
+  "(\003\022\024\n\014ae_net_nanos\030\004 \001(\003\022\027\n\017f_handler_na"
+  "nos\030\005 \001(\003\022\026\n\016repl_net_nanos\030\006 \001(\003\022\031\n\021rep"
+  "lication_nanos\030\007 \001(\003\022\031\n\021quorum_wait_nano"
+  "s\030\010 \001(\003\022\023\n\013total_nanos\030\n \001(\003\022\014\n\004busy\030\013 \001"
+  "(\010\022\026\n\016retry_after_ms\030\014 \001(\005\022\032\n\022storage_re"
+  "ad_nanos\030\023 \001(\003\022\033\n\023storage_write_nanos\030\024 "
+  "\001(\003\022\032\n\022storage_sync_nanos\030\025 \001(\003J\004\010\t\020\nJ\004\010"
+  "\r\020\023R\013mutex_nanosR\016post_rpc_nanosR\021commit"
+  "_wait_nanosR\023wg_scheduling_nanosR\rmutex_"
+  "a_nanosR\rmutex_b_nanosR\rmutex_c_nanos\"%\n"
+  "\021ClientEchoRequest\022\020\n\010commands\030\001 \003(\014\"\037\n\022"
+  "ClientEchoResponse\022\t\n\001n\030\001 \001(\003\"\035\n\033ClientG"
+  "etCommitIndexRequest\"A\n\034ClientGetCommitI"
+  "ndexResponse\022\024\n\014commit_index\030\001 \001(\004\022\013\n\003er"
+  "r\030\002 \001(\t\"(\n\024ClientGetHashRequest\022\020\n\010at_co"
+  "unt\030\001 \001(\004\"A\n\025ClientGetHashResponse\022\014\n\004ha"
+  "sh\030\001 \001(\t\022\r\n\005count\030\002 \001(\004\022\013\n\003err\030\003 \001(\t\"\036\n\034"
+  "ClientGetAEBatchStatsRequest\"R\n\035ClientGe"
+  "tAEBatchStatsResponse\022\020\n\010ae_count\030\001 \001(\004\022"
+  "\022\n\nae_entries\030\002 \001(\004\022\013\n\003err\030\003 \001(\tB\026Z\024nvme"
+  "of_raft/rpcprotob\006proto3"
   ;
 static ::_pbi::once_flag descriptor_table_rpcproto_2eproto_once;
 const ::_pbi::DescriptorTable descriptor_table_rpcproto_2eproto = {
-    false, false, 2622, descriptor_table_protodef_rpcproto_2eproto,
+    false, false, 2544, descriptor_table_protodef_rpcproto_2eproto,
     "rpcproto.proto",
     &descriptor_table_rpcproto_2eproto_once, nullptr, 0, 20,
     schemas, file_default_instances, TableStruct_rpcproto_2eproto::offsets,
@@ -2228,11 +2202,6 @@ AppendEntriesResponse::AppendEntriesResponse(const AppendEntriesResponse& from)
     , decltype(_impl_.handler_duration_nanos_){}
     , decltype(_impl_.write_pba_rt_nanos_){}
     , decltype(_impl_.storage_copy_nanos_){}
-    , decltype(_impl_.handle_ae_lock_wait_nanos_){}
-    , decltype(_impl_.handle_ae_pre_nanos_){}
-    , decltype(_impl_.handle_ae_lock_wait2_nanos_){}
-    , decltype(_impl_.handle_ae_post_nanos_){}
-    , decltype(_impl_.handle_ae_persist_nanos_){}
     , decltype(_impl_.push_map_hash_){}
     , decltype(_impl_.storage_read_nanos_){}
     , decltype(_impl_.storage_write_nanos_){}
@@ -2268,11 +2237,6 @@ inline void AppendEntriesResponse::SharedCtor(
     , decltype(_impl_.handler_duration_nanos_){int64_t{0}}
     , decltype(_impl_.write_pba_rt_nanos_){int64_t{0}}
     , decltype(_impl_.storage_copy_nanos_){int64_t{0}}
-    , decltype(_impl_.handle_ae_lock_wait_nanos_){int64_t{0}}
-    , decltype(_impl_.handle_ae_pre_nanos_){int64_t{0}}
-    , decltype(_impl_.handle_ae_lock_wait2_nanos_){int64_t{0}}
-    , decltype(_impl_.handle_ae_post_nanos_){int64_t{0}}
-    , decltype(_impl_.handle_ae_persist_nanos_){int64_t{0}}
     , decltype(_impl_.push_map_hash_){uint64_t{0u}}
     , decltype(_impl_.storage_read_nanos_){int64_t{0}}
     , decltype(_impl_.storage_write_nanos_){int64_t{0}}
@@ -2377,46 +2341,6 @@ const char* AppendEntriesResponse::_InternalParse(const char* ptr, ::_pbi::Parse
       case 7:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 56)) {
           _impl_.storage_copy_nanos_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // int64 handle_ae_lock_wait_nanos = 8;
-      case 8:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 64)) {
-          _impl_.handle_ae_lock_wait_nanos_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // int64 handle_ae_pre_nanos = 9;
-      case 9:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 72)) {
-          _impl_.handle_ae_pre_nanos_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // int64 handle_ae_lock_wait2_nanos = 10;
-      case 10:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 80)) {
-          _impl_.handle_ae_lock_wait2_nanos_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // int64 handle_ae_post_nanos = 11;
-      case 11:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 88)) {
-          _impl_.handle_ae_post_nanos_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // int64 handle_ae_persist_nanos = 12;
-      case 12:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 96)) {
-          _impl_.handle_ae_persist_nanos_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -2547,36 +2471,6 @@ uint8_t* AppendEntriesResponse::_InternalSerialize(
     target = ::_pbi::WireFormatLite::WriteInt64ToArray(7, this->_internal_storage_copy_nanos(), target);
   }
 
-  // int64 handle_ae_lock_wait_nanos = 8;
-  if (this->_internal_handle_ae_lock_wait_nanos() != 0) {
-    target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteInt64ToArray(8, this->_internal_handle_ae_lock_wait_nanos(), target);
-  }
-
-  // int64 handle_ae_pre_nanos = 9;
-  if (this->_internal_handle_ae_pre_nanos() != 0) {
-    target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteInt64ToArray(9, this->_internal_handle_ae_pre_nanos(), target);
-  }
-
-  // int64 handle_ae_lock_wait2_nanos = 10;
-  if (this->_internal_handle_ae_lock_wait2_nanos() != 0) {
-    target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteInt64ToArray(10, this->_internal_handle_ae_lock_wait2_nanos(), target);
-  }
-
-  // int64 handle_ae_post_nanos = 11;
-  if (this->_internal_handle_ae_post_nanos() != 0) {
-    target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteInt64ToArray(11, this->_internal_handle_ae_post_nanos(), target);
-  }
-
-  // int64 handle_ae_persist_nanos = 12;
-  if (this->_internal_handle_ae_persist_nanos() != 0) {
-    target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteInt64ToArray(12, this->_internal_handle_ae_persist_nanos(), target);
-  }
-
   // uint64 push_map_hash = 13;
   if (this->_internal_push_map_hash() != 0) {
     target = stream->EnsureSpace(target);
@@ -2679,31 +2573,6 @@ size_t AppendEntriesResponse::ByteSizeLong() const {
     total_size += ::_pbi::WireFormatLite::Int64SizePlusOne(this->_internal_storage_copy_nanos());
   }
 
-  // int64 handle_ae_lock_wait_nanos = 8;
-  if (this->_internal_handle_ae_lock_wait_nanos() != 0) {
-    total_size += ::_pbi::WireFormatLite::Int64SizePlusOne(this->_internal_handle_ae_lock_wait_nanos());
-  }
-
-  // int64 handle_ae_pre_nanos = 9;
-  if (this->_internal_handle_ae_pre_nanos() != 0) {
-    total_size += ::_pbi::WireFormatLite::Int64SizePlusOne(this->_internal_handle_ae_pre_nanos());
-  }
-
-  // int64 handle_ae_lock_wait2_nanos = 10;
-  if (this->_internal_handle_ae_lock_wait2_nanos() != 0) {
-    total_size += ::_pbi::WireFormatLite::Int64SizePlusOne(this->_internal_handle_ae_lock_wait2_nanos());
-  }
-
-  // int64 handle_ae_post_nanos = 11;
-  if (this->_internal_handle_ae_post_nanos() != 0) {
-    total_size += ::_pbi::WireFormatLite::Int64SizePlusOne(this->_internal_handle_ae_post_nanos());
-  }
-
-  // int64 handle_ae_persist_nanos = 12;
-  if (this->_internal_handle_ae_persist_nanos() != 0) {
-    total_size += ::_pbi::WireFormatLite::Int64SizePlusOne(this->_internal_handle_ae_persist_nanos());
-  }
-
   // uint64 push_map_hash = 13;
   if (this->_internal_push_map_hash() != 0) {
     total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_push_map_hash());
@@ -2774,21 +2643,6 @@ void AppendEntriesResponse::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, 
   }
   if (from._internal_storage_copy_nanos() != 0) {
     _this->_internal_set_storage_copy_nanos(from._internal_storage_copy_nanos());
-  }
-  if (from._internal_handle_ae_lock_wait_nanos() != 0) {
-    _this->_internal_set_handle_ae_lock_wait_nanos(from._internal_handle_ae_lock_wait_nanos());
-  }
-  if (from._internal_handle_ae_pre_nanos() != 0) {
-    _this->_internal_set_handle_ae_pre_nanos(from._internal_handle_ae_pre_nanos());
-  }
-  if (from._internal_handle_ae_lock_wait2_nanos() != 0) {
-    _this->_internal_set_handle_ae_lock_wait2_nanos(from._internal_handle_ae_lock_wait2_nanos());
-  }
-  if (from._internal_handle_ae_post_nanos() != 0) {
-    _this->_internal_set_handle_ae_post_nanos(from._internal_handle_ae_post_nanos());
-  }
-  if (from._internal_handle_ae_persist_nanos() != 0) {
-    _this->_internal_set_handle_ae_persist_nanos(from._internal_handle_ae_persist_nanos());
   }
   if (from._internal_push_map_hash() != 0) {
     _this->_internal_set_push_map_hash(from._internal_push_map_hash());
@@ -4196,16 +4050,9 @@ ClientApplyTimedResponse::ClientApplyTimedResponse(const ClientApplyTimedRespons
     , decltype(_impl_.repl_net_nanos_){}
     , decltype(_impl_.replication_nanos_){}
     , decltype(_impl_.quorum_wait_nanos_){}
-    , decltype(_impl_.mutex_nanos_){}
     , decltype(_impl_.total_nanos_){}
     , decltype(_impl_.busy_){}
     , decltype(_impl_.retry_after_ms_){}
-    , decltype(_impl_.post_rpc_nanos_){}
-    , decltype(_impl_.commit_wait_nanos_){}
-    , decltype(_impl_.wg_scheduling_nanos_){}
-    , decltype(_impl_.mutex_a_nanos_){}
-    , decltype(_impl_.mutex_b_nanos_){}
-    , decltype(_impl_.mutex_c_nanos_){}
     , decltype(_impl_.storage_read_nanos_){}
     , decltype(_impl_.storage_write_nanos_){}
     , decltype(_impl_.storage_sync_nanos_){}
@@ -4239,16 +4086,9 @@ inline void ClientApplyTimedResponse::SharedCtor(
     , decltype(_impl_.repl_net_nanos_){int64_t{0}}
     , decltype(_impl_.replication_nanos_){int64_t{0}}
     , decltype(_impl_.quorum_wait_nanos_){int64_t{0}}
-    , decltype(_impl_.mutex_nanos_){int64_t{0}}
     , decltype(_impl_.total_nanos_){int64_t{0}}
     , decltype(_impl_.busy_){false}
     , decltype(_impl_.retry_after_ms_){0}
-    , decltype(_impl_.post_rpc_nanos_){int64_t{0}}
-    , decltype(_impl_.commit_wait_nanos_){int64_t{0}}
-    , decltype(_impl_.wg_scheduling_nanos_){int64_t{0}}
-    , decltype(_impl_.mutex_a_nanos_){int64_t{0}}
-    , decltype(_impl_.mutex_b_nanos_){int64_t{0}}
-    , decltype(_impl_.mutex_c_nanos_){int64_t{0}}
     , decltype(_impl_.storage_read_nanos_){int64_t{0}}
     , decltype(_impl_.storage_write_nanos_){int64_t{0}}
     , decltype(_impl_.storage_sync_nanos_){int64_t{0}}
@@ -4363,14 +4203,6 @@ const char* ClientApplyTimedResponse::_InternalParse(const char* ptr, ::_pbi::Pa
         } else
           goto handle_unusual;
         continue;
-      // int64 mutex_nanos = 9;
-      case 9:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 72)) {
-          _impl_.mutex_nanos_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
       // int64 total_nanos = 10;
       case 10:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 80)) {
@@ -4391,54 +4223,6 @@ const char* ClientApplyTimedResponse::_InternalParse(const char* ptr, ::_pbi::Pa
       case 12:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 96)) {
           _impl_.retry_after_ms_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // int64 post_rpc_nanos = 13;
-      case 13:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 104)) {
-          _impl_.post_rpc_nanos_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // int64 commit_wait_nanos = 14;
-      case 14:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 112)) {
-          _impl_.commit_wait_nanos_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // int64 wg_scheduling_nanos = 15;
-      case 15:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 120)) {
-          _impl_.wg_scheduling_nanos_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // int64 mutex_a_nanos = 16;
-      case 16:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 128)) {
-          _impl_.mutex_a_nanos_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // int64 mutex_b_nanos = 17;
-      case 17:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 136)) {
-          _impl_.mutex_b_nanos_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // int64 mutex_c_nanos = 18;
-      case 18:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 144)) {
-          _impl_.mutex_c_nanos_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -4548,12 +4332,6 @@ uint8_t* ClientApplyTimedResponse::_InternalSerialize(
     target = ::_pbi::WireFormatLite::WriteInt64ToArray(8, this->_internal_quorum_wait_nanos(), target);
   }
 
-  // int64 mutex_nanos = 9;
-  if (this->_internal_mutex_nanos() != 0) {
-    target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteInt64ToArray(9, this->_internal_mutex_nanos(), target);
-  }
-
   // int64 total_nanos = 10;
   if (this->_internal_total_nanos() != 0) {
     target = stream->EnsureSpace(target);
@@ -4570,42 +4348,6 @@ uint8_t* ClientApplyTimedResponse::_InternalSerialize(
   if (this->_internal_retry_after_ms() != 0) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteInt32ToArray(12, this->_internal_retry_after_ms(), target);
-  }
-
-  // int64 post_rpc_nanos = 13;
-  if (this->_internal_post_rpc_nanos() != 0) {
-    target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteInt64ToArray(13, this->_internal_post_rpc_nanos(), target);
-  }
-
-  // int64 commit_wait_nanos = 14;
-  if (this->_internal_commit_wait_nanos() != 0) {
-    target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteInt64ToArray(14, this->_internal_commit_wait_nanos(), target);
-  }
-
-  // int64 wg_scheduling_nanos = 15;
-  if (this->_internal_wg_scheduling_nanos() != 0) {
-    target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteInt64ToArray(15, this->_internal_wg_scheduling_nanos(), target);
-  }
-
-  // int64 mutex_a_nanos = 16;
-  if (this->_internal_mutex_a_nanos() != 0) {
-    target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteInt64ToArray(16, this->_internal_mutex_a_nanos(), target);
-  }
-
-  // int64 mutex_b_nanos = 17;
-  if (this->_internal_mutex_b_nanos() != 0) {
-    target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteInt64ToArray(17, this->_internal_mutex_b_nanos(), target);
-  }
-
-  // int64 mutex_c_nanos = 18;
-  if (this->_internal_mutex_c_nanos() != 0) {
-    target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteInt64ToArray(18, this->_internal_mutex_c_nanos(), target);
   }
 
   // int64 storage_read_nanos = 19;
@@ -4684,11 +4426,6 @@ size_t ClientApplyTimedResponse::ByteSizeLong() const {
     total_size += ::_pbi::WireFormatLite::Int64SizePlusOne(this->_internal_quorum_wait_nanos());
   }
 
-  // int64 mutex_nanos = 9;
-  if (this->_internal_mutex_nanos() != 0) {
-    total_size += ::_pbi::WireFormatLite::Int64SizePlusOne(this->_internal_mutex_nanos());
-  }
-
   // int64 total_nanos = 10;
   if (this->_internal_total_nanos() != 0) {
     total_size += ::_pbi::WireFormatLite::Int64SizePlusOne(this->_internal_total_nanos());
@@ -4702,42 +4439,6 @@ size_t ClientApplyTimedResponse::ByteSizeLong() const {
   // int32 retry_after_ms = 12;
   if (this->_internal_retry_after_ms() != 0) {
     total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(this->_internal_retry_after_ms());
-  }
-
-  // int64 post_rpc_nanos = 13;
-  if (this->_internal_post_rpc_nanos() != 0) {
-    total_size += ::_pbi::WireFormatLite::Int64SizePlusOne(this->_internal_post_rpc_nanos());
-  }
-
-  // int64 commit_wait_nanos = 14;
-  if (this->_internal_commit_wait_nanos() != 0) {
-    total_size += ::_pbi::WireFormatLite::Int64SizePlusOne(this->_internal_commit_wait_nanos());
-  }
-
-  // int64 wg_scheduling_nanos = 15;
-  if (this->_internal_wg_scheduling_nanos() != 0) {
-    total_size += ::_pbi::WireFormatLite::Int64SizePlusOne(this->_internal_wg_scheduling_nanos());
-  }
-
-  // int64 mutex_a_nanos = 16;
-  if (this->_internal_mutex_a_nanos() != 0) {
-    total_size += 2 +
-      ::_pbi::WireFormatLite::Int64Size(
-        this->_internal_mutex_a_nanos());
-  }
-
-  // int64 mutex_b_nanos = 17;
-  if (this->_internal_mutex_b_nanos() != 0) {
-    total_size += 2 +
-      ::_pbi::WireFormatLite::Int64Size(
-        this->_internal_mutex_b_nanos());
-  }
-
-  // int64 mutex_c_nanos = 18;
-  if (this->_internal_mutex_c_nanos() != 0) {
-    total_size += 2 +
-      ::_pbi::WireFormatLite::Int64Size(
-        this->_internal_mutex_c_nanos());
   }
 
   // int64 storage_read_nanos = 19;
@@ -4803,9 +4504,6 @@ void ClientApplyTimedResponse::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_ms
   if (from._internal_quorum_wait_nanos() != 0) {
     _this->_internal_set_quorum_wait_nanos(from._internal_quorum_wait_nanos());
   }
-  if (from._internal_mutex_nanos() != 0) {
-    _this->_internal_set_mutex_nanos(from._internal_mutex_nanos());
-  }
   if (from._internal_total_nanos() != 0) {
     _this->_internal_set_total_nanos(from._internal_total_nanos());
   }
@@ -4814,24 +4512,6 @@ void ClientApplyTimedResponse::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_ms
   }
   if (from._internal_retry_after_ms() != 0) {
     _this->_internal_set_retry_after_ms(from._internal_retry_after_ms());
-  }
-  if (from._internal_post_rpc_nanos() != 0) {
-    _this->_internal_set_post_rpc_nanos(from._internal_post_rpc_nanos());
-  }
-  if (from._internal_commit_wait_nanos() != 0) {
-    _this->_internal_set_commit_wait_nanos(from._internal_commit_wait_nanos());
-  }
-  if (from._internal_wg_scheduling_nanos() != 0) {
-    _this->_internal_set_wg_scheduling_nanos(from._internal_wg_scheduling_nanos());
-  }
-  if (from._internal_mutex_a_nanos() != 0) {
-    _this->_internal_set_mutex_a_nanos(from._internal_mutex_a_nanos());
-  }
-  if (from._internal_mutex_b_nanos() != 0) {
-    _this->_internal_set_mutex_b_nanos(from._internal_mutex_b_nanos());
-  }
-  if (from._internal_mutex_c_nanos() != 0) {
-    _this->_internal_set_mutex_c_nanos(from._internal_mutex_c_nanos());
   }
   if (from._internal_storage_read_nanos() != 0) {
     _this->_internal_set_storage_read_nanos(from._internal_storage_read_nanos());

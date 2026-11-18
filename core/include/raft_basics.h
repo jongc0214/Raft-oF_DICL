@@ -78,6 +78,17 @@ static_assert(RING_OFFSET % SECTOR_SIZE == 0, "슬롯 경계는 섹터 정렬이
  * NTP 조정에 구간 측정이 흔들린다. */
 using clock_type = std::chrono::steady_clock;
 
+/* RAFT_TIMING: apply-timed 분해(ApplyTimings / ReplSample)를 만드는 구간
+ * 타이머의 컴파일 스위치. build.sh 의 RAFT_TIMING=0 / CMake 의
+ * -DRAFT_TIMING=OFF 로 끈다. 끄면 그 타이머들이 `#if RAFT_TIMING` 블록째
+ * 빠지고, apply-timed 는 Total 만 채운다. 타임아웃 같은 비지연 시계와
+ * plain apply 의 latency_nanos, apply_timed 의 Total 은 감싸지 않는다.
+ * storage/ 는 core/ 를 include 하지 않으므로 같은 기본값이
+ * storage/raft_blockcopy_server.cpp 에도 있다 -- 둘을 같이 바꿀 것. */
+#ifndef RAFT_TIMING
+#define RAFT_TIMING 1
+#endif
+
 /* start 이후 지금까지 흐른 시간(나노초). ApplyTimings/ReplSample의 모든
  * 구간이 이 함수로 측정된다. */
 inline int64_t elapsed_ns(clock_type::time_point start) {

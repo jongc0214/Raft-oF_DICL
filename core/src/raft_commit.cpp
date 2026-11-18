@@ -43,21 +43,12 @@ void Server::signal_committed_batch(
  *  where a pre-election entry gets committed without a current-term
  *  entry confirming leadership."
  *
- * 계측은 prof.enabled(=-profile 플래그)가 켜져 있을 때만 값을 기록한다.
- * 꺼져 있어도 clock_type::now() 호출 자체는 남아 있다 -- 원본과 같은
- * 구조이며, 실측에서 유의미한 오버헤드로 나타나지 않았다.
  * Go의 defer-unlock은 함수 끝의 명시적 unlock으로 재현했다.
  * ============================================================ */
 void Server::advance_commit_index() {
-    bool profiling = prof.enabled.load() != 0;
-    auto t_call = clock_type::now();
     std::vector<std::shared_ptr<EntryCommitSignal>> sig;
 
     mu.lock();
-    int64_t lock_wait_ns = 0;
-    if (profiling) {
-        lock_wait_ns = elapsed_ns(t_call);
-    }
     advance_commit_index_locked(&sig);
 
     if (raft.state == ServerState::Leader) {
@@ -83,31 +74,17 @@ void Server::advance_commit_index() {
         }
     }
 
-    if (profiling) {
-        prof.aci_lock_wait_ns.store(lock_wait_ns);
-    }
     mu.unlock();   /* Go의 defer 위치와 동일 (함수 끝에서 항상 unlock) */
     signal_committed_batch(sig);
 }
 
 void Server:: advance_commit_index_locked(
     std::vector<std::shared_ptr<EntryCommitSignal>> *to_signal) {
-    
-    bool profiling = prof.enabled.load() != 0;
-    clock_type::time_point t_locked;
-    if (profiling) {
-        t_locked = clock_type::now();
-    }
-
-    int64_t quorum_ns = 0;
-    int64_t aci_sort_ns = 0;
-    int64_t aci_signal_ns = 0;
 
     /* (1) Leader: quorum 기반 commitIndex 전진 */
     if (raft.state == ServerState::Leader) {
         // uint64_t last_log_index = ring.tail_log_index - 1;
         uint64_t last_log_index = durable_last_index_locked();
-        auto t_sort = clock_type::now();
 
         std::vector<uint64_t> matches(raft.cluster.size());
         for (size_t j = 0; j < raft.cluster.size(); j++) {
@@ -121,9 +98,6 @@ void Server:: advance_commit_index_locked(
          * v4 문서 6장에서 검증한 min-of-majority와 동일한 계산 */
         std::sort(matches.begin(), matches.end(), std::greater<uint64_t>());
         uint64_t majority_idx = matches[matches.size() / 2];
-        if (profiling) {
-            aci_sort_ns = elapsed_ns(t_sort);
-        }
 
         if (majority_idx > raft.commit_index) {
             /* §5.4.2: majorityIdx의 엔트리가 current term일 때만 전진.
@@ -137,7 +111,6 @@ void Server:: advance_commit_index_locked(
 
                     /* "Signal committed for entries newly committed.
                      *  Non-blocking cap=1 sends; safe under s.mu." */
-                    auto t_signal = clock_type::now();
                     uint64_t oldest_c = oldest_log_index();
                     for (uint64_t idx = prev_commit + 1; idx <= majority_idx; idx++) {
                         if (idx >= oldest_c && idx < ring.tail_log_index) {
@@ -154,20 +127,9 @@ void Server:: advance_commit_index_locked(
                             }
                         }
                     }
-                    if (profiling) {
-                        aci_signal_ns = elapsed_ns(t_signal);
-                    }
                 }
             }
         }
-    }
-
-    if (profiling) {
-        quorum_ns = elapsed_ns(t_locked);
-        prof.aci_quorum_ns.store(quorum_ns);
-        prof.aci_sort_ns.store(aci_sort_ns);
-        prof.aci_signal_ns.store(aci_signal_ns);
-        /* prof.aci_slot_gc_ns, prof.aci_backpres_ns는 do_slot_gc()가 씀 */
     }
 
     /* Apply는 applyWorker가 비동기로 수행. 깨우기만 함.
@@ -199,29 +161,6 @@ void Server::apply_pending() {
         return;
     }
 
-    bool profiling = prof.enabled.load() != 0;
-    auto t_apply = clock_type::now();
-
-    struct ApplyStat {
-        clock_type::time_point t0 = clock_type::now();
-        uint64_t n = 0;
-        ~ApplyStat() {
-            static uint64_t calls = 0, entries = 0;
-            static int64_t held_ns = 0;
-            static auto g_t0 = clock_type::now();
-            calls++; entries += n; held_ns += elapsed_ns(t0);
-            const int64_t el = elapsed_ns(g_t0);
-            if (el >= 5'000'000'000LL) {
-                std::fprintf(stderr,
-                    "[APPLY] calls/s=%.0f entries/call=%.1f held/call=%.0fus held/entry=%.1fus util=%.0f%%\n",
-                    calls * 1e9 / el, entries ? (double)entries / calls : 0.0,
-                    held_ns / 1e3 / calls, entries ? held_ns / 1e3 / entries : 0.0,
-                    100.0 * held_ns / el);
-                calls = entries = 0; held_ns = 0; g_t0 = clock_type::now();
-            }
-        }
-    } stat;
-
     int applied = 0;
     uint64_t oldest = oldest_log_index();
 
@@ -244,7 +183,6 @@ void Server::apply_pending() {
         raft.last_applied++;
         
         applied++;
-        stat.n++;
         
         if (applied >= kApplyBatchLimit) {
             /* 배치 상한에 닿았다. 원본은 여기서 reset_election_timeout()을
@@ -264,10 +202,6 @@ void Server::apply_pending() {
             applied = 0;
         }
     }
-
-    if (profiling) {
-        prof.aci_apply_loop_ns.store(elapsed_ns(t_apply));
-    }
 }
 
 /* ============================================================
@@ -281,9 +215,6 @@ void Server::do_slot_gc() {
     if (raft.state != ServerState::Leader) {
         return;
     }
-    bool profiling = prof.enabled.load() != 0;
-    auto t_gc = clock_type::now();
-
     uint64_t last_log_index = ring.tail_log_index - 1;
     uint64_t min_match = last_log_index;
     for (size_t j = 0; j < raft.cluster.size(); j++) {
@@ -309,26 +240,12 @@ void Server::do_slot_gc() {
 
     if (freed) {
         recompute_head_slot();
-        if (profiling) {
-            auto t_bp = clock_type::now();
-            ring_not_full.notify_all();   /* Go의 Broadcast() 대응 */
-            prof.aci_backpres_ns.store(elapsed_ns(t_bp));
-        } else {
-            ring_not_full.notify_all();
-        }
+        ring_not_full.notify_all();   /* Go의 Broadcast() 대응 */
     }
 
     /* 슬롯을 해제한 것과 같은 기준으로 in-memory log 벡터도 잘라낸다
      * (아래 trim_log_locked 주석 참고). */
     trim_log_locked(min_match);
-
-    if (profiling) {
-        int64_t gc_ns = elapsed_ns(t_gc);
-        if (freed) {
-            gc_ns -= prof.aci_backpres_ns.load();
-        }
-        prof.aci_slot_gc_ns.store(gc_ns);
-    }
 }
 
 /* ============================================================

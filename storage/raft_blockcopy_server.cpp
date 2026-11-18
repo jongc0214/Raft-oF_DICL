@@ -24,31 +24,49 @@
  * 않으므로 익명 namespace 에 둔다 -- 예전에는 헤더에 inline 으로 노출돼 있어
  * 이 헤더를 include 하는 4개 TU 가 pread/pwrite 루프를 매번 컴파일했다. */
 
+/* RAFT_TIMING: apply-timed 분해 타이머의 컴파일 스위치 (SRead/SWrite/SSync/
+ * StorageIO). 끄면 응답의 *_nanos 가 0이다. storage/ 는 core/ 를 include
+ * 하지 않으므로 core/include/raft_basics.h 와 같은 기본값을 여기 한 번 더
+ * 둔다 -- 둘을 같이 바꿀 것. */
+#ifndef RAFT_TIMING
+#define RAFT_TIMING 1
+#endif
+
 namespace nvmeof_raft {
 namespace blockcopy {
 
 namespace {
 
+#if RAFT_TIMING
 uint64_t ns_diff(const struct timespec &a, const struct timespec &b) {
     return static_cast<uint64_t>(b.tv_sec - a.tv_sec) * 1000000000ull +
            static_cast<uint64_t>(b.tv_nsec - a.tv_nsec);
 }
+#endif
 
 int write_pba_copy_buf(int src_fd, int dst_fd,
                                int64_t pba_src, int64_t pba_dst,
                                int nbytes, void *buf,
                                uint64_t *read_ns, uint64_t *write_ns) {
+#if RAFT_TIMING
     struct timespec t0{}, t1{};
 
     clock_gettime(CLOCK_MONOTONIC_RAW, &t0);
+#endif
     ssize_t r = pread(src_fd, buf, static_cast<size_t>(nbytes), pba_src);
+#if RAFT_TIMING
     clock_gettime(CLOCK_MONOTONIC_RAW, &t1);
     *read_ns = ns_diff(t0, t1);
+#else
+    *read_ns = 0;
+#endif
     if (r != nbytes) {
         return -1;
     }
 
+#if RAFT_TIMING
     clock_gettime(CLOCK_MONOTONIC_RAW, &t0);
+#endif
     struct Ring { io_uring r; Ring() { io_uring_queue_init(8, &r, 0); } ~Ring() { io_uring_queue_exit(&r); } };
     static thread_local Ring ring;   // 스레드마다 한 번만 만들고, 스레드 끝날 때 정리
 
@@ -62,8 +80,12 @@ int write_pba_copy_buf(int src_fd, int dst_fd,
     ssize_t w = cqe->res;            // 성공 시 쓴 바이트 수, 실패 시 -errno
     io_uring_cqe_seen(&ring.r, cqe);
 
+#if RAFT_TIMING
     clock_gettime(CLOCK_MONOTONIC_RAW, &t1);
     *write_ns = ns_diff(t0, t1);
+#else
+    *write_ns = 0;
+#endif
     if (w != nbytes) {
         return -1;
     }
@@ -183,9 +205,6 @@ WritePBARsp BlockCopyServer::handle_write_pba(const WritePBAReq &req){
         }
 
         rsp.copy_nanos = static_cast<int64_t>(read_ns + write_ns);
-        std::lock_guard<std::mutex> lk(mu_);
-        read_ns_ += read_ns;
-        write_ns_ += write_ns;
         return rsp;
     }
 
@@ -250,8 +269,10 @@ WritePBABatchRsp BlockCopyServer::handle_write_pba_batch(const WritePBABatchReq 
 
         uint64_t total_read_ns = 0, total_write_ns = 0;
 
+#if RAFT_TIMING
         struct timespec batch_t0{}, batch_t1{};
         clock_gettime(CLOCK_MONOTONIC_RAW, &batch_t0);
+#endif
 
         /* 청크를 이 연결 스레드에서 순서대로 복사한다. 청크는 보통 1개이고
          * 링 wrap / extent 경계에서만 2개가 되므로, 요청마다 워커 스레드를
@@ -272,38 +293,33 @@ WritePBABatchRsp BlockCopyServer::handle_write_pba_batch(const WritePBABatchReq 
             total_write_ns += wr;
         }
 
+#if RAFT_TIMING
         struct timespec sync_t0{}, sync_t1{};
         clock_gettime(CLOCK_MONOTONIC_RAW, &sync_t0);
+#endif
         // const int sync_rc = ::fdatasync(dst_fd);
+#if RAFT_TIMING
         clock_gettime(CLOCK_MONOTONIC_RAW, &sync_t1);
+#endif
         // if (sync_rc != 0) {
         //     buf_pool_.release(buf, buf_cap);
         //     rsp.error = "fdatasync destination failed";
         //     return rsp;
         // }
 
+#if RAFT_TIMING
         clock_gettime(CLOCK_MONOTONIC_RAW, &batch_t1);
+#endif
 
         buf_pool_.release(buf, buf_cap);
 
         rsp.read_nanos = static_cast<int64_t>(total_read_ns);
         rsp.write_nanos = static_cast<int64_t>(total_write_ns);
+#if RAFT_TIMING
         rsp.sync_nanos = static_cast<int64_t>(ns_diff(sync_t0, sync_t1));
         rsp.copy_nanos = static_cast<int64_t>(ns_diff(batch_t0, batch_t1));
-        std::lock_guard<std::mutex> lk(mu_);
-        read_ns_ += total_read_ns;
-        write_ns_ += total_write_ns;
+#endif
         return rsp;
-    }
-
-GetTimeRsp BlockCopyServer::handle_get_time(){
-        std::lock_guard<std::mutex> lk(mu_);
-        return {read_ns_, write_ns_, other_ns_};
-    }
-
-void BlockCopyServer::handle_reset_time(){
-        std::lock_guard<std::mutex> lk(mu_);
-        read_ns_ = write_ns_ = other_ns_ = 0;
     }
 
 bool BlockCopyServer::get_fd(int dev_idx, int &out_fd) const{

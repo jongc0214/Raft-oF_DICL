@@ -9,7 +9,7 @@ AENet~StorageIO는 AE 값이 요청마다 복제된 것 (엔트리당 값이 아
 import glob, os, re, statistics as st, sys
 
 KEYS = ["Total", "LHandler", "LPersist", "AENet", "FHandler", "ReplNet", "StorageIO",
-        "QuorumWait", "Mutex", "MutexA", "MutexB", "MutexC", "CommitWait", "residual"]
+        "QuorumWait", "residual"]
 IDENT = ["LHandler", "LPersist", "AENet", "FHandler", "ReplNet", "StorageIO", "QuorumWait", "residual"]
 NAN = float("nan")
 
@@ -112,8 +112,7 @@ def show_one(o, size=None):
     for k in KEYS:
         if o[k] != o[k]: continue
         share = f"{100*o[k]/o['Total']:7.1f}%" if k in IDENT else f"{'':>8s}"
-        tag = "  ← 가산 아님(대기시간 진단)" if k in ("Mutex", "MutexA", "MutexB", "MutexC", "CommitWait") else ""
-        print(f"{k:12s}{f(o[k])}{f(o[k+'_p50'])}{f(o[k+'_p99'])}{share}{tag}")
+        print(f"{k:12s}{f(o[k])}{f(o[k+'_p50'])}{f(o[k+'_p99'])}{share}")
     print("-- 엔트리당 환산 (엔트리 단위로 읽는 값) --")
     print(f"엔트리당 직렬 비용      = {o['entry_serial_us']:.1f} µs  (1/처리량. 락 A 등 직렬 단계의 상한)")
     exp = o['N'] * o['batch']

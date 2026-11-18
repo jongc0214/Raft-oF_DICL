@@ -14,6 +14,10 @@
 #   raft_node_asan   ASan+UBSan (build.sh asan 대응, 기본 빌드에서 제외)
 #   raft_link_check  더미 main으로 undefined 심볼 검증 (build.sh check 대응)
 #   regen-proto      protoc이 있으면 .pb.{h,cc} 재생성 (없으면 경고만)
+#
+# 옵션:
+#   -DRAFT_TIMING=OFF  apply-timed 분해 타이머를 컴파일에서 뺀다 (build.sh 의
+#                      RAFT_TIMING=0 대응). 기본 ON.
 
 cmake_minimum_required(VERSION 3.16)
 project(raftof_dare LANGUAGES CXX)
@@ -30,6 +34,14 @@ endif()
 
 # build.sh와 동일한 경고 수준. HANDOFF §1이 "경고 0"을 보증하는 상태다.
 add_compile_options(-Wall -Wextra)
+
+option(RAFT_TIMING "apply-timed breakdown timers (core/include/raft_basics.h)" ON)
+if(RAFT_TIMING)
+    add_compile_definitions(RAFT_TIMING=1)
+else()
+    add_compile_definitions(RAFT_TIMING=0)
+endif()
+message(STATUS "RAFT_TIMING: ${RAFT_TIMING}")
 
 # ---------------------------------------------------------------------------
 # protobuf 탐색 — build.sh의 해당 절의 4단 폴백을 그대로 재현한다.

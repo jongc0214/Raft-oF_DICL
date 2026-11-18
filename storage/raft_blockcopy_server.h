@@ -113,8 +113,6 @@ struct WritePBABatchRsp {
     int64_t sync_nanos = 0;
 };
 
-struct GetTimeRsp { uint64_t read_nanos = 0, write_nanos = 0, other_nanos = 0; };
-
 /* ============================================================
  * BlockCopyServer
  *
@@ -133,10 +131,6 @@ public:
 
     WritePBABatchRsp handle_write_pba_batch(const WritePBABatchReq &req);
 
-    GetTimeRsp handle_get_time();
-
-    void handle_reset_time();
-
 private:
     bool get_fd(int dev_idx, int &out_fd) const;
     bool get_read_fd(int dev_idx, int &out_fd) const;   /* src 전용: read_fds_ 우선 */
@@ -146,9 +140,6 @@ private:
     std::vector<std::string> paths_;
 
     AlignedBufPool buf_pool_;   /* WritePBABatch 복사 버퍼 재사용 풀 */
-
-    std::mutex mu_;
-    uint64_t read_ns_ = 0, write_ns_ = 0, other_ns_ = 0;
 };
 
 } /* namespace blockcopy */

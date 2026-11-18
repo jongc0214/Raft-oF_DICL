@@ -80,14 +80,7 @@ bool dispatch_client_method(const std::string &method,
         rsp.repl_net_ns = t.repl_net_ns;
         rsp.replication_ns = t.storage_io_ns;   /* 원본 Replication = StorageIO */
         rsp.quorum_wait_ns = t.quorum_wait_ns;
-        rsp.mutex_ns = t.mutex_ns;
-        rsp.mutex_a_ns = t.mutex_a_ns;
-        rsp.mutex_b_ns = t.mutex_b_ns;
-        rsp.mutex_c_ns = t.mutex_c_ns;
         rsp.total_ns = t.total_ns;
-        rsp.post_rpc_ns = t.post_rpc_ns;
-        rsp.commit_wait_ns = t.commit_wait_ns;
-        rsp.wg_scheduling_ns = t.wg_scheduling_ns;
         rsp.storage_read_ns = t.storage_read_ns;
         rsp.storage_write_ns = t.storage_write_ns;
         rsp.storage_sync_ns = t.storage_sync_ns;

@@ -34,9 +34,9 @@ namespace nvmeof_raft {
 /* 스토리지 노드의 메서드 디스패치.
  *
  * 지금 등록된 것은 core/do_pba_copy가 실제로 쓰는 WritePBABatch 하나뿐이다.
- * WritePBA(단건)/GetTime/ResetTime은 서버 측 구현이
- * storage/raft_blockcopy_server.h에 이미 있으나 proto 메시지가 없어 도달할 수
- * 없다 (DECISIONS.md 참고 -- 당장 필요하지 않다). */
+ * WritePBA(단건)는 서버 측 구현이 storage/raft_blockcopy_server.h에 있으나
+ * proto 메시지가 없어 도달할 수 없다. GetTime/ResetTime은 구현도 없다
+ * (DECISIONS.md 참고 -- 당장 필요하지 않다). */
 bool dispatch_blockcopy_method(blockcopy::BlockCopyServer *bcs, const std::string &method, const std::vector<uint8_t> &body, std::vector<uint8_t> &rsp_body);
 
 void blockcopy_serve_connection(int fd, blockcopy::BlockCopyServer *bcs);

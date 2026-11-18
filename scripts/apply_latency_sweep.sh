@@ -4,8 +4,8 @@
 #                           지연이 어떻게 변하는지 재고, 결과를 CSV 한 장으로 낸다
 #
 # 묻는 것: **엔트리 하나가 커질 때 지연의 어느 항이 늘어나는가.** ApplyTimings
-# 13항(Total/LHandler/LPersist/AENet/FHandler/ReplNet/StorageIO/QuorumWait/
-# Mutex/CommitWait/SRead/SWrite/SSync/residual)을 크기별로 나란히 놓는다.
+# 12항(Total/LHandler/LPersist/AENet/FHandler/ReplNet/StorageIO/QuorumWait/
+# SRead/SWrite/SSync/residual)을 크기별로 나란히 놓는다.
 # SRead/SWrite 는 StorageIO 중 스토리지 서버의 pread/pwrite 합, SSync 는 fdatasync(진단용).
 #
 # **서버는 이미 떠 있다고 가정한다.** 이 스크립트는 raft_node 도
@@ -42,9 +42,9 @@
 #
 # ── 측정 전에 반드시 확인할 것 ───────────────────────────────────────────
 #
-# **(1) 노드에 -profile 이 켜져 있어야 한다.** 꺼져 있으면 ApplyTimings 항들이
-# 0/폴백으로 나오고 항등식이 성립하지 않는다. 첫 지점에서 LPersist/StorageIO/
-# QuorumWait 가 전부 0 이면 이 스크립트가 경고한다.
+# **(1) 첫 지점에서 LPersist/StorageIO/QuorumWait 가 전부 0 이면 경고한다.**
+# 샘플 폴백 경로이거나 노드가 분해 항을 채우지 못한 경우로, 항등식이 성립하지
+# 않는다. (분해 항은 항상 측정된다 -- -profile 플래그는 2026-11-18에 없어졌다.)
 #
 # **(2) 노드에 -ae-batch 상한을 줄 것.** MaxAppendEntriesBatch 기본값이
 # 1,000,000(사실상 무제한)이라 팔로워 하나가 뒤처지면 리더가 매 라운드 밀린
@@ -414,13 +414,13 @@ run_point() {
     printf '  size=%-5s rep=%-3s  Total p50=%-10s p99=%-10s  busy=%-6s n=%s\n' \
         "$slabel" "$rep" "${total_p50:--}" "${total_p99:--}" "$busy" "$n_samples"
 
-    # -profile 이 꺼져 있으면 서버가 채우는 항들이 전부 0 으로 나온다.
+    # 서버가 채우는 항들이 전부 0 이면 샘플 폴백 경로다.
     # 항등식을 논하기 전에 여기서 걸러준다. 첫 지점에서 한 번만 본다.
     if [ "$PROFILE_CHECKED" -eq 0 ]; then
         PROFILE_CHECKED=1
         if [ "$zero_terms" -eq 3 ]; then
-            warn "LPersist/StorageIO/QuorumWait 가 모두 0 이다 -- 노드에 -profile 이"
-            warn "  빠졌거나 샘플 폴백 경로다. 항등식이 성립하지 않는다"
+            warn "LPersist/StorageIO/QuorumWait 가 모두 0 이다 -- 샘플 폴백 경로다."
+            warn "  항등식이 성립하지 않는다"
         fi
     fi
     if [ "$busy" -gt "$BUSY_WARN" ]; then

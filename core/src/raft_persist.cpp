@@ -101,10 +101,14 @@ int64_t Server::persist_circular(bool write_log, int n_new_entries,
             if (run_buffer.empty()) {
                 return;
             }
+#if RAFT_TIMING
             auto t_io = clock_type::now();
+#endif
             flush_count++;
             io.cached_fd->write_at_file(run_buffer.data(), run_buffer.size(), run_off);
+#if RAFT_TIMING
             nvme_ns += elapsed_ns(t_io);
+#endif
             run_off += static_cast<int64_t>(run_buffer.size());
             run_buffer.clear();
         };
@@ -207,9 +211,13 @@ int64_t Server::persist_circular(bool write_log, int n_new_entries,
 
         /* Header lives at logical offset 0. 링 슬롯 0은 다음 4K 페이지
          * (RING_OFFSET == PAGE_SIZE)에서 시작한다 -- 원본은 헤더 바로 뒤였다 (D24). */
+#if RAFT_TIMING
         auto t_hdr_io = clock_type::now();
+#endif
         io.cached_fd->write_at_file(header.data(), header.size(), 0);
+#if RAFT_TIMING
         nvme_ns += elapsed_ns(t_hdr_io);   /* header 작성 시 writeI/O에 추가 */
+#endif
 
         ring.persisted_init = true;
         ring.persisted_term = cur_term;
@@ -218,9 +226,13 @@ int64_t Server::persist_circular(bool write_log, int n_new_entries,
 
     if ((write_log && n_new_entries > 0) || write_header) {
         /* 3-2. fdatasync */
+#if RAFT_TIMING
         auto t_sync_io = clock_type::now();
+#endif
         io.cached_fd->fdatasync();
+#if RAFT_TIMING
         nvme_ns += elapsed_ns(t_sync_io);
+#endif
     }
 
     return nvme_ns;
@@ -407,15 +419,21 @@ int64_t Server::persist_io(const PersistPlan &plan) {
     /* prepare 가 push 버퍼에 인코딩했으면 그 버퍼에서, 아니면 ring.run_buf 에서 쓴다 */
     AlignedBuffer &buf = plan.push_buf ? *plan.push_buf : ring.run_buf;
     for (const PersistWrite &w : plan.writes) {
+#if RAFT_TIMING
         auto t_io = clock_type::now();
+#endif
         io.cached_fd->write_at_file(buf.data() + w.buf_off, w.len, w.dev_off);
+#if RAFT_TIMING
         nvme_ns += elapsed_ns(t_io);
+#endif
     }
+#if RAFT_TIMING
     if (!plan.writes.empty()) {
         auto t_sync = clock_type::now();
         // io.cached_fd->fdatasync();
         nvme_ns += elapsed_ns(t_sync);
     }
+#endif
     return nvme_ns;
 }
 
@@ -461,12 +479,18 @@ Server::FollowerWriteResult Server::persist_follower_entries(uint64_t start_slot
                      needed, req.prev_log_index + 1 + i);
     }
 
+#if RAFT_TIMING
     auto t_io = clock_type::now();
+#endif
     io.cached_fd->write_at_file(buf.data(), buf.size(), slot_offset(start_slot));
+#if RAFT_TIMING
     r.write_ns = elapsed_ns(t_io);
     auto t_sync = clock_type::now();
+#endif
     io.cached_fd->fdatasync();
+#if RAFT_TIMING
     r.sync_ns = elapsed_ns(t_sync);
+#endif
     return r;
 }
 

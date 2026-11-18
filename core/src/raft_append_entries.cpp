@@ -32,58 +32,6 @@ namespace nvmeof_raft {
 static std::mutex diag_ae_rpc_mu;
 // [TMP MUTEX]
 
-namespace {
-struct AeCycStat {
-    std::atomic<uint64_t> n{0}, entries{0};
-    std::atomic<int64_t> b_wait{0}, b_held{0}, copy{0}, rpc{0}, c_wait{0}, c_held{0}, cycle{0};
-    std::atomic<int64_t> t0{0};
-};
-AeCycStat g_aecyc;
-
-void aecyc_record(size_t followers, uint64_t entries, int64_t b_wait, int64_t b_held,
-                  int64_t copy, int64_t rpc, int64_t c_wait, int64_t c_held, int64_t cycle) {
-    auto rel = std::memory_order_relaxed;
-    g_aecyc.n.fetch_add(1, rel);
-    g_aecyc.entries.fetch_add(entries, rel);
-    g_aecyc.b_wait.fetch_add(b_wait, rel);
-    g_aecyc.b_held.fetch_add(b_held, rel);
-    g_aecyc.copy.fetch_add(copy, rel);
-    g_aecyc.rpc.fetch_add(rpc, rel);
-    g_aecyc.c_wait.fetch_add(c_wait, rel);
-    g_aecyc.c_held.fetch_add(c_held, rel);
-    g_aecyc.cycle.fetch_add(cycle, rel);
-
-    const int64_t now = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
-    int64_t t0 = g_aecyc.t0.load(rel);
-    if (t0 == 0) {
-        g_aecyc.t0.compare_exchange_strong(t0, now);
-        return;
-    }
-    const int64_t el = now - t0;
-    if (el < 5'000'000'000LL || !g_aecyc.t0.compare_exchange_strong(t0, now)) {
-        return;   /* 5초 전이거나 다른 스레드가 이미 출력 담당 */
-    }
-    const uint64_t cnt = g_aecyc.n.exchange(0);
-    const uint64_t ent = g_aecyc.entries.exchange(0);
-    const double bw = g_aecyc.b_wait.exchange(0), bh = g_aecyc.b_held.exchange(0),
-                 cp = g_aecyc.copy.exchange(0), rp = g_aecyc.rpc.exchange(0),
-                 cw = g_aecyc.c_wait.exchange(0), ch = g_aecyc.c_held.exchange(0),
-                 cy = g_aecyc.cycle.exchange(0);
-    if (cnt == 0) {
-        return;
-    }
-    const double us = 1e-3 / cnt;
-    std::fprintf(stderr,
-        "[AECYC] ae/s=%.0f entries/ae=%.1f period/follower=%.0fus cycle=%.0fus | "
-        "b_wait=%.0f b_held=%.0f copy=%.0f rpc=%.0f c_wait=%.0f c_held=%.0f (us) | "
-        "mu util: B=%.1f%% C=%.1f%%\n",
-        cnt * 1e9 / el, (double)ent / cnt, (double)el * followers / 1e3 / cnt, cy * us,
-        bw * us, bh * us, cp * us, rp * us, cw * us, ch * us,
-        100.0 * bh / el, 100.0 * ch / el);
-}
-}  // namespace
-
 void Server::append_entries(std::shared_ptr<ReplSink> sink, bool heartbeat) {
     for (size_t i = 0; i < raft.cluster.size(); i++) {
         int fi = static_cast<int>(i);
@@ -123,13 +71,10 @@ void Server::trigger_ae_worker(int fi, std::shared_ptr<ReplSink> sink, bool hear
 /* append_entries_worker: 팔로워 한 명에 대한 처리 로직.
  * 원본 append_entries의 go func(fi) {...} 본문 그대로 (로직 변경 없음,
  * 감싸는 함수만 분리) */
-void Server::append_entries_worker(int fi, ReplSink *sink, bool heartbeat_due) {
+void Server::append_entries_worker(int fi, [[maybe_unused]] ReplSink *sink, bool heartbeat_due) {
     {
         /* ---- 4-1. waitLockB ---- */
-        auto t_b = clock_type::now();
         mu.lock();
-        auto t_b_held_start = clock_type::now();
-        int64_t mutex_b = elapsed_ns(t_b);
 
         /* ---- 4-2. logValid ---- */
         uint64_t next = raft.cluster[static_cast<size_t>(fi)].next_index;
@@ -211,14 +156,11 @@ void Server::append_entries_worker(int fi, ReplSink *sink, bool heartbeat_due) {
         uint64_t total_slots = 0;
         uint64_t slots_per_entry = 0;
         uint64_t start_slot = 0;
-        int64_t ae_sub_slot_map_ns = 0;
-        int64_t ae_sub_mark_slots_ns = 0;
 
         /* ---- 4-3. slotMapLookup (원본 raft.go:2475-2554 그대로 포팅) ----
          * "Get start slot from first entry's slot map. If missing (or
          *  already GC'd), the slot was freed -- PBA copy would read
          *  stale data. Send heartbeat only." */
-        auto t_slot_map_lookup = clock_type::now();
         // fast-backoff 또는 follower restart -> next <= GC구간인 경우 예외처리
         // 이 분기 빼고 실험해보기
         if (len_entries > 0) {
@@ -286,12 +228,10 @@ void Server::append_entries_worker(int fi, ReplSink *sink, bool heartbeat_due) {
                 }
             }
         }
-        ae_sub_slot_map_ns = elapsed_ns(t_slot_map_lookup);
 
         /* PBALookup (원본 raft.go:2564-2613 그대로 포팅) */
         uint64_t leader_pba_src = 0;
         uint64_t log_block_length = 0;
-        /* timer */ auto t_pba_lookup = clock_type::now();
         if (len_entries > 0) {
             PbaRangeResult r = leader_pba_for_range(start_slot, total_slots);
             leader_pba_src = r.pba_src;
@@ -322,7 +262,6 @@ void Server::append_entries_worker(int fi, ReplSink *sink, bool heartbeat_due) {
             }
             log_block_length = total_slots;
         }
-        int64_t ae_sub_pba_lookup_ns = elapsed_ns(t_pba_lookup);
 
         uint64_t sent_next = next;
         bool has_entries = len_entries > 0;
@@ -333,9 +272,7 @@ void Server::append_entries_worker(int fi, ReplSink *sink, bool heartbeat_due) {
          *  device via PBA copy; follower loads it lazily at apply time." */
         const bool normal_mode = (replication_mode == ReplicationMode::Normal);
         std::vector<EntryMeta> metas;
-        int64_t ae_sub_meta_build_ns = 0;
         if (len_entries > 0) {
-            auto t_mb = clock_type::now();
             try {
                 metas = build_entry_metas_locked(next, len_entries, normal_mode);
             } catch (const std::exception &) {
@@ -345,7 +282,6 @@ void Server::append_entries_worker(int fi, ReplSink *sink, bool heartbeat_due) {
                 mu.unlock();
                 return;
             }
-            ae_sub_meta_build_ns = elapsed_ns(t_mb);
         }
 
         if (has_entries) {
@@ -399,7 +335,6 @@ void Server::append_entries_worker(int fi, ReplSink *sink, bool heartbeat_due) {
             }
         }
 
-        int64_t ae_lock_b_held = elapsed_ns(t_b_held_start);
         mu.unlock();   /* "lockB Finish" */
 
         /* ---- Leader-Side replication (Server::ReplicationMode::LeaderSide,
@@ -457,20 +392,21 @@ void Server::append_entries_worker(int fi, ReplSink *sink, bool heartbeat_due) {
         //     rt_ns = elapsed_ns(t_rep);
         // }
 
+#if RAFT_TIMING
         auto t_rep = clock_type::now();
+#endif
 
         /* transport 가 없으면(주입 안 된 하네스) 전송 실패와 동일하게 다룬다 */
         bool ok = (transport != nullptr) && transport->append_entries(fi, req, rsp);
 
+#if RAFT_TIMING
         int64_t rt_ns = elapsed_ns(t_rep);
+#endif
 
         /* ---- Lock C: post-RPC bookkeeping ---- */
         std::vector<std::shared_ptr<EntryCommitSignal>> sig;
 
-        auto t_c = clock_type::now();
         mu.lock();
-        int64_t mutex_c = elapsed_ns(t_c);
-        auto t_c_held_start = clock_type::now();   /* [AECYC] */
 
         if (has_entries) {
             raft.cluster[static_cast<size_t>(fi)].inflight = false;
@@ -511,7 +447,9 @@ void Server::append_entries_worker(int fi, ReplSink *sink, bool heartbeat_due) {
          * 때문**이므로(하트비트는 sink == nullptr), 폴백 값을 남기는
          * 코드가 sink 가드 안에 있으면 영원히 채워지지 않는다.
          * 실제로 그랬다 -- store가 0건이어서 폴백이 항상 0을 읽었다
-         * (DECISIONS.md U4). 그래서 가드는 push에만 건다. */
+         * (DECISIONS.md U4). 그래서 가드는 push에만 건다.
+         * RAFT_TIMING=0이면 샘플을 아예 만들지 않는다 (분해 항이 없다). */
+#if RAFT_TIMING
         if (rsp.success && has_entries) {
             ReplSample sample;
             // [Diag]
@@ -546,24 +484,9 @@ void Server::append_entries_worker(int fi, ReplSink *sink, bool heartbeat_due) {
                 sample.storage_write_ns = rsp.storage_write_ns;
                 sample.storage_sync_ns = rsp.storage_sync_ns;
             }
-            /* sink가 없으면 Apply가 아니므로 Lock A 대기도 없다 */
-            sample.mutex_ns = (sink != nullptr ? sink->mutex_a_ns() : 0) + mutex_b + mutex_c;
-            sample.mutex_c_ns = mutex_c;
-            sample.mutex_b_ns = mutex_b;
             sample.ae_rt_ns = rt_ns;
-            sample.lock_b_held_ns = ae_lock_b_held;
-            sample.slot_map_ns = ae_sub_slot_map_ns;
-            sample.mark_slots_ns = ae_sub_mark_slots_ns;
-            sample.pba_lookup_ns = ae_sub_pba_lookup_ns;
-            sample.meta_build_ns = ae_sub_meta_build_ns;
-            sample.handle_ae_lock_wait_ns = rsp.handle_ae_lock_wait_ns;
-            sample.handle_ae_pre_ns = rsp.handle_ae_pre_ns;
-            sample.handle_ae_lock_wait2_ns = rsp.handle_ae_lock_wait2_ns;
-            sample.handle_ae_persist_ns = rsp.handle_ae_persist_ns;
-            sample.handle_ae_post_ns = rsp.handle_ae_post_ns;
 
-            /* 폴백용 "최근 값". prof.enabled로 게이팅하지 않는다 --
-             * apply_timed의 항등식 7항은 -profile 없이도 동작해야 한다. */
+            /* 폴백용 "최근 값" (sink가 없을 때 derive_apply_timings가 읽는다) */
             prof.sample_ae_rt_ns.store(sample.ae_rt_ns);
             prof.sample_r2_ns.store(sample.r2_ns);
             prof.sample_write_pba_rt_ns.store(sample.write_pba_rt_ns);
@@ -571,13 +494,12 @@ void Server::append_entries_worker(int fi, ReplSink *sink, bool heartbeat_due) {
             prof.sample_storage_read_ns.store(sample.storage_read_ns);
             prof.sample_storage_write_ns.store(sample.storage_write_ns);
             prof.sample_storage_sync_ns.store(sample.storage_sync_ns);
-            prof.sample_mutex_ns.store(sample.mutex_ns);
-            prof.sample_mutex_c_ns.store(sample.mutex_c_ns);
 
             if (sink != nullptr) {
                 sink->push(sample);
             }
         }
+#endif
 
         /* 성공/실패 처리는 각각 별도 메서드로 뽑아 뒀다 -- 둘 다 순수하게
          * cluster[fi]와 log만 만지는 산술이라 단위 테스트가 붙는다
@@ -594,20 +516,7 @@ void Server::append_entries_worker(int fi, ReplSink *sink, bool heartbeat_due) {
             }
         }
 
-        /* Lock C 보유 시간을 재놓고 버린다. ReplSample::lock_c_held_ns와
-         * ProfilingSink::… 둘 다 기록하는 코드가 없어서, ApplyTimings의
-         * post_rpc_ns가 항상 0으로 남고 wg_scheduling_ns 역산이 부정확하다
-         * -- DECISIONS.md U4 (계측 배선 미완, 리팩토링 범위 밖). */
-        const int64_t aecyc_c_held = elapsed_ns(t_c_held_start);   /* [AECYC] mu 보유 중 */
         mu.unlock();
-        if (has_entries && rsp.success) {
-            /* 스토리지 복사 시간: leader 모드면 리더가 잰 값, destination 모드면 팔로워가 응답에 실어 준 값 */
-            const int64_t copy_ns = (replication_mode == ReplicationMode::LeaderSide)
-                                        ? leader_side_copy.storage_copy_ns
-                                        : rsp.storage_copy_ns;
-            aecyc_record(raft.cluster.size() - 1, len_entries, mutex_b, ae_lock_b_held,
-                         copy_ns, rt_ns, mutex_c, aecyc_c_held, elapsed_ns(t_b));
-        }
         signal_committed_batch(sig);
     }
 }

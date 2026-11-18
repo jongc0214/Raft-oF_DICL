@@ -75,7 +75,9 @@ TEST_CASE("WritePBABatch: fdatasync 시간을 따로 돌려주고 배치 wall �
         BlockCopyServer server({open_rw(src), open_rw(dst)}, {src, dst});
         WritePBABatchRsp rsp = server.handle_write_pba_batch(one_chunk_req(4096));
         REQUIRE(rsp.error.empty());
+#if RAFT_TIMING   /* 끈 빌드에서는 *_nanos 가 전부 0이다 */
         CHECK(rsp.sync_nanos > 0);
+#endif
         CHECK(rsp.read_nanos + rsp.write_nanos + rsp.sync_nanos <= rsp.copy_nanos);
     }
     ::unlink(src.c_str());

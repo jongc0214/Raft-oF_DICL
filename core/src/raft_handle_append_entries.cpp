@@ -98,7 +98,9 @@ Server::DoPbaCopyResult Server::do_pba_copy(uint64_t leader_pba_src,
     }
 
     /* Pass 2: 배치 RPC 발사 (단일 배치 호출로 전체 청크 목록 전달) */
+#if RAFT_TIMING
     auto t_rpc = clock_type::now();
+#endif
     int64_t storage_copy_ns = 0;
     int64_t storage_read_ns = 0;
     int64_t storage_write_ns = 0;
@@ -114,7 +116,11 @@ Server::DoPbaCopyResult Server::do_pba_copy(uint64_t leader_pba_src,
          * 잡아 fail-soft로 이 배치를 건너뛰고 다음 라운드에 재시도한다. */
         throw std::runtime_error("do_pba_copy: " + bc_error);
     }
+#if RAFT_TIMING
     int64_t write_pba_rt_ns = elapsed_ns(t_rpc);
+#else
+    int64_t write_pba_rt_ns = 0;
+#endif
 
     return {write_pba_rt_ns, storage_copy_ns, storage_read_ns, storage_write_ns, storage_sync_ns};
 }
@@ -127,28 +133,23 @@ Server::DoPbaCopyResult Server::do_pba_copy(uint64_t leader_pba_src,
  * ============================================================ */
 void Server::handle_append_entries_request(const AppendEntriesRequest &req,
                                             AppendEntriesResponse &rsp) {
+#if RAFT_TIMING
     auto t0 = clock_type::now();
+#endif
     mu.lock();
-    auto t_after_lock = clock_type::now();
-    int64_t handle_ae_lock_wait = elapsed_ns(t0);
 
     wait_persist_idle_locked();
-
-    int64_t handle_ae_pre = 0, handle_ae_lock_wait2 = 0, handle_ae_persist = 0, handle_ae_post = 0;
-    clock_type::time_point t_post{};
-    bool t_post_set = false;
 
     /* Go의 defer: 함수 반환 직전 unlock + 타이밍 필드 채우기.
      * C++에선 명시적으로 각 return 경로 앞에서 호출 */
     auto finalize = [&]() {
+#if RAFT_TIMING
         int64_t handler_duration = elapsed_ns(t0);   /* Unlock 전에 측정 (스케줄링 지연 제외) */
         mu.unlock();
         rsp.handler_duration_ns = handler_duration;
-        rsp.handle_ae_lock_wait_ns = handle_ae_lock_wait;
-        rsp.handle_ae_pre_ns = handle_ae_pre;
-        rsp.handle_ae_lock_wait2_ns = handle_ae_lock_wait2;
-        rsp.handle_ae_post_ns = handle_ae_post;
-        rsp.handle_ae_persist_ns = handle_ae_persist;
+#else
+        mu.unlock();
+#endif
         /* [Push Integration] push 후보 알림 -- 모든 반환 경로(거절 포함)가 여기를 지난다.
          * io.ring_map_hash 는 init_storage 이후 바뀌지 않으므로 mu 밖에서 읽어도 된다. */
         rsp.push_map_hash = (replication_mode == ReplicationMode::Push) ? io.ring_map_hash : 0;
@@ -228,10 +229,7 @@ void Server::handle_append_entries_request(const AppendEntriesRequest &req,
             if (req.leader_commit > raft.commit_index) {
                 raft.commit_index = std::min(req.leader_commit, ring.tail_log_index - 1);
             }
-            auto t_ps = clock_type::now();
             persist_circular(false, 0);   /* follower: persist header only */
-            handle_ae_persist = elapsed_ns(t_ps);
-            // rsp.storage_copy_ns  += handle_ae_persist;   /* persistCircular -> storageio */
             rsp.success = true;
             finalize();
             return;
@@ -247,8 +245,6 @@ void Server::handle_append_entries_request(const AppendEntriesRequest &req,
             ring.tail_slot = req.start_slot;
         }
         uint64_t old_tail_slot = ring.tail_slot;
-
-        handle_ae_pre = elapsed_ns(t_after_lock);
 
         /* Leader-Side(Server::ReplicationMode::LeaderSide)에서는
          * req.data_already_copied가 true -- leader의 storage node가
@@ -270,9 +266,7 @@ void Server::handle_append_entries_request(const AppendEntriesRequest &req,
             } catch (const std::exception &) {
                 copy_failed = true;
             }
-            auto t_lock2 = clock_type::now();
             mu.lock();
-            handle_ae_lock_wait2 = elapsed_ns(t_lock2);
         } else if (!req.data_already_copied) {
             mu.unlock();
 
@@ -285,9 +279,7 @@ void Server::handle_append_entries_request(const AppendEntriesRequest &req,
                 copy_failed = true;
             }
 
-            auto t_lock2 = clock_type::now();
             mu.lock();
-            handle_ae_lock_wait2 = elapsed_ns(t_lock2);
         } else if (replication_mode == ReplicationMode::Push) {
             /* push: 리더가 이 배치를 내 볼륨에 이미 썼다(flush 없이). 내 연결로 같은
              * 볼륨을 flush 해야 성공을 답할 수 있다 -- 리더는 이 응답으로만
@@ -296,19 +288,19 @@ void Server::handle_append_entries_request(const AppendEntriesRequest &req,
              * 측정값은 normal 모드처럼 StorageIO/SSync 칸에 넣는다. */
             mu.unlock();
             try {
+#if RAFT_TIMING
                 auto t_sync = clock_type::now();
+#endif
                 io.cached_fd->fdatasync_device();
+#if RAFT_TIMING
                 const int64_t sync_ns = elapsed_ns(t_sync);
                 copy_result = DoPbaCopyResult{0, sync_ns, 0, 0, sync_ns};
+#endif
             } catch (const std::exception &) {
                 copy_failed = true;
             }
-            auto t_lock2 = clock_type::now();
             mu.lock();
-            handle_ae_lock_wait2 = elapsed_ns(t_lock2);
         }
-        t_post = clock_type::now();
-        t_post_set = true;
 
         rsp.write_pba_rt_ns = copy_result.write_pba_rt_ns;
         rsp.storage_copy_ns = copy_result.storage_copy_ns;
@@ -377,18 +369,11 @@ void Server::handle_append_entries_request(const AppendEntriesRequest &req,
         raft.commit_index = std::min(req.leader_commit, ring.tail_log_index - 1);
     }
 
-    if (t_post_set) {
-        handle_ae_post = elapsed_ns(t_post);
-    }
-
     /* "X -> writeHeader 조건 확인... 아무것도 안 씀" 은 term/vote가
      * 안 바뀌면 persist_circular가 헤더도 안 쓰고 조기 반환한다는
      * 원본 동작을 그대로 따름 (persist_circular 내부에서 이미 처리됨) */
-    auto t_pn = clock_type::now();
     persist_circular(false, 0);   /* follower: persist header only
                                       (entries already durable via doPBACopy) */
-    handle_ae_persist = elapsed_ns(t_pn);
-    // rsp.storage_copy_ns += handle_ae_persist;
     rsp.success = true;
     finalize();
 }

@@ -83,7 +83,7 @@
 # **(3) p50 / p99 는 서버 쪽 값만 있다.** 클라이언트는 RPC 별 서버 시간을
 # 모아 분포를 내지만 자기 벽시계는 wall / N 평균만 낸다. srv_samples 는 성공한
 # RPC 수라 busy 가 있으면 n 과 다를 수 있다. 항별 분해가 필요하면
-# apply_latency_sweep.sh 를 볼 것 (그쪽은 -profile 오버헤드가 섞인다).
+# apply_latency_sweep.sh 를 볼 것 (그쪽은 apply-timed 계측 오버헤드가 섞인다).
 #
 # **(4) RPC 타임아웃 (RDMA 5s, TCP 2s) 이 요청당 상한이다.** 지점이 실패해도
 # 스윕은 계속하고 마지막에 실패 수를 보고한다 (종료코드 1).

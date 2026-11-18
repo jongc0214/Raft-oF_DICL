@@ -83,7 +83,7 @@
 # **(3) p50 / p99 는 서버 쪽 값만 있다.** 클라이언트는 RPC 별 서버 시간을
 # 모아 분포를 내지만 자기 벽시계는 wall / N 평균만 낸다. srv_samples 는 성공한
 # RPC 수라 busy 가 있으면 n 과 다를 수 있다. 항별 분해가 필요하면
-# apply_latency_sweep.sh 를 볼 것 (그쪽은 -profile 오버헤드가 섞인다).
+# apply_latency_sweep.sh 를 볼 것 (그쪽은 apply-timed 계측 오버헤드가 섞인다).
 #
 # **(4) RPC 타임아웃 (RDMA 5s, TCP 2s) 이 요청당 상한이다.** 지점이 실패해도
 # 스윕은 계속하고 마지막에 실패 수를 보고한다 (종료코드 1).
@@ -113,11 +113,11 @@ BIN="${BIN:-$REPO/build}"
 
 # 기본값: env.sh 의 NODES/TOPO 로 만든 그 망의 주소 (노드를 띄운 것과 같은 TOPO 를 줄 것)
 ADDRS="${ADDRS:-$(source "$REPO/env.sh" >/dev/null 2>&1 && build_cluster "$ADDR_NET" >/dev/null 2>&1 && echo "$ADDRS")}"
-SIZES="${SIZES:-64 256 1024 4096 16384 65536 262144 1048576}"
+SIZES="${SIZES:-4096 16384 65536 262144}"
 # 엔트리 헤더 크기 (core/include/raft_constants.h ENTRY_META_SIZE). SIZES 는
 # 이 헤더를 포함한 엔트리 크기이고, 클라이언트 -size 에는 이만큼 뺀 값을 넘긴다
 ENTRY_META=32
-N="${N:-100000}"
+N="${N:-10000}"
 REPS="${REPS:-3}"
 TIMEOUT_S="${TIMEOUT_S:-15}"
 RDMA_MAX="${RDMA_MAX:-$((4 * 1024 * 1024 + 168))}"

@@ -1258,11 +1258,6 @@ class AppendEntriesResponse final :
     kHandlerDurationNanosFieldNumber = 5,
     kWritePbaRtNanosFieldNumber = 6,
     kStorageCopyNanosFieldNumber = 7,
-    kHandleAeLockWaitNanosFieldNumber = 8,
-    kHandleAePreNanosFieldNumber = 9,
-    kHandleAeLockWait2NanosFieldNumber = 10,
-    kHandleAePostNanosFieldNumber = 11,
-    kHandleAePersistNanosFieldNumber = 12,
     kPushMapHashFieldNumber = 13,
     kStorageReadNanosFieldNumber = 16,
     kStorageWriteNanosFieldNumber = 17,
@@ -1355,51 +1350,6 @@ class AppendEntriesResponse final :
   void _internal_set_storage_copy_nanos(int64_t value);
   public:
 
-  // int64 handle_ae_lock_wait_nanos = 8;
-  void clear_handle_ae_lock_wait_nanos();
-  int64_t handle_ae_lock_wait_nanos() const;
-  void set_handle_ae_lock_wait_nanos(int64_t value);
-  private:
-  int64_t _internal_handle_ae_lock_wait_nanos() const;
-  void _internal_set_handle_ae_lock_wait_nanos(int64_t value);
-  public:
-
-  // int64 handle_ae_pre_nanos = 9;
-  void clear_handle_ae_pre_nanos();
-  int64_t handle_ae_pre_nanos() const;
-  void set_handle_ae_pre_nanos(int64_t value);
-  private:
-  int64_t _internal_handle_ae_pre_nanos() const;
-  void _internal_set_handle_ae_pre_nanos(int64_t value);
-  public:
-
-  // int64 handle_ae_lock_wait2_nanos = 10;
-  void clear_handle_ae_lock_wait2_nanos();
-  int64_t handle_ae_lock_wait2_nanos() const;
-  void set_handle_ae_lock_wait2_nanos(int64_t value);
-  private:
-  int64_t _internal_handle_ae_lock_wait2_nanos() const;
-  void _internal_set_handle_ae_lock_wait2_nanos(int64_t value);
-  public:
-
-  // int64 handle_ae_post_nanos = 11;
-  void clear_handle_ae_post_nanos();
-  int64_t handle_ae_post_nanos() const;
-  void set_handle_ae_post_nanos(int64_t value);
-  private:
-  int64_t _internal_handle_ae_post_nanos() const;
-  void _internal_set_handle_ae_post_nanos(int64_t value);
-  public:
-
-  // int64 handle_ae_persist_nanos = 12;
-  void clear_handle_ae_persist_nanos();
-  int64_t handle_ae_persist_nanos() const;
-  void set_handle_ae_persist_nanos(int64_t value);
-  private:
-  int64_t _internal_handle_ae_persist_nanos() const;
-  void _internal_set_handle_ae_persist_nanos(int64_t value);
-  public:
-
   // uint64 push_map_hash = 13;
   void clear_push_map_hash();
   uint64_t push_map_hash() const;
@@ -1461,11 +1411,6 @@ class AppendEntriesResponse final :
     int64_t handler_duration_nanos_;
     int64_t write_pba_rt_nanos_;
     int64_t storage_copy_nanos_;
-    int64_t handle_ae_lock_wait_nanos_;
-    int64_t handle_ae_pre_nanos_;
-    int64_t handle_ae_lock_wait2_nanos_;
-    int64_t handle_ae_post_nanos_;
-    int64_t handle_ae_persist_nanos_;
     uint64_t push_map_hash_;
     int64_t storage_read_nanos_;
     int64_t storage_write_nanos_;
@@ -2561,16 +2506,9 @@ class ClientApplyTimedResponse final :
     kReplNetNanosFieldNumber = 6,
     kReplicationNanosFieldNumber = 7,
     kQuorumWaitNanosFieldNumber = 8,
-    kMutexNanosFieldNumber = 9,
     kTotalNanosFieldNumber = 10,
     kBusyFieldNumber = 11,
     kRetryAfterMsFieldNumber = 12,
-    kPostRpcNanosFieldNumber = 13,
-    kCommitWaitNanosFieldNumber = 14,
-    kWgSchedulingNanosFieldNumber = 15,
-    kMutexANanosFieldNumber = 16,
-    kMutexBNanosFieldNumber = 17,
-    kMutexCNanosFieldNumber = 18,
     kStorageReadNanosFieldNumber = 19,
     kStorageWriteNanosFieldNumber = 20,
     kStorageSyncNanosFieldNumber = 21,
@@ -2652,15 +2590,6 @@ class ClientApplyTimedResponse final :
   void _internal_set_quorum_wait_nanos(int64_t value);
   public:
 
-  // int64 mutex_nanos = 9;
-  void clear_mutex_nanos();
-  int64_t mutex_nanos() const;
-  void set_mutex_nanos(int64_t value);
-  private:
-  int64_t _internal_mutex_nanos() const;
-  void _internal_set_mutex_nanos(int64_t value);
-  public:
-
   // int64 total_nanos = 10;
   void clear_total_nanos();
   int64_t total_nanos() const;
@@ -2686,60 +2615,6 @@ class ClientApplyTimedResponse final :
   private:
   int32_t _internal_retry_after_ms() const;
   void _internal_set_retry_after_ms(int32_t value);
-  public:
-
-  // int64 post_rpc_nanos = 13;
-  void clear_post_rpc_nanos();
-  int64_t post_rpc_nanos() const;
-  void set_post_rpc_nanos(int64_t value);
-  private:
-  int64_t _internal_post_rpc_nanos() const;
-  void _internal_set_post_rpc_nanos(int64_t value);
-  public:
-
-  // int64 commit_wait_nanos = 14;
-  void clear_commit_wait_nanos();
-  int64_t commit_wait_nanos() const;
-  void set_commit_wait_nanos(int64_t value);
-  private:
-  int64_t _internal_commit_wait_nanos() const;
-  void _internal_set_commit_wait_nanos(int64_t value);
-  public:
-
-  // int64 wg_scheduling_nanos = 15;
-  void clear_wg_scheduling_nanos();
-  int64_t wg_scheduling_nanos() const;
-  void set_wg_scheduling_nanos(int64_t value);
-  private:
-  int64_t _internal_wg_scheduling_nanos() const;
-  void _internal_set_wg_scheduling_nanos(int64_t value);
-  public:
-
-  // int64 mutex_a_nanos = 16;
-  void clear_mutex_a_nanos();
-  int64_t mutex_a_nanos() const;
-  void set_mutex_a_nanos(int64_t value);
-  private:
-  int64_t _internal_mutex_a_nanos() const;
-  void _internal_set_mutex_a_nanos(int64_t value);
-  public:
-
-  // int64 mutex_b_nanos = 17;
-  void clear_mutex_b_nanos();
-  int64_t mutex_b_nanos() const;
-  void set_mutex_b_nanos(int64_t value);
-  private:
-  int64_t _internal_mutex_b_nanos() const;
-  void _internal_set_mutex_b_nanos(int64_t value);
-  public:
-
-  // int64 mutex_c_nanos = 18;
-  void clear_mutex_c_nanos();
-  int64_t mutex_c_nanos() const;
-  void set_mutex_c_nanos(int64_t value);
-  private:
-  int64_t _internal_mutex_c_nanos() const;
-  void _internal_set_mutex_c_nanos(int64_t value);
   public:
 
   // int64 storage_read_nanos = 19;
@@ -2785,16 +2660,9 @@ class ClientApplyTimedResponse final :
     int64_t repl_net_nanos_;
     int64_t replication_nanos_;
     int64_t quorum_wait_nanos_;
-    int64_t mutex_nanos_;
     int64_t total_nanos_;
     bool busy_;
     int32_t retry_after_ms_;
-    int64_t post_rpc_nanos_;
-    int64_t commit_wait_nanos_;
-    int64_t wg_scheduling_nanos_;
-    int64_t mutex_a_nanos_;
-    int64_t mutex_b_nanos_;
-    int64_t mutex_c_nanos_;
     int64_t storage_read_nanos_;
     int64_t storage_write_nanos_;
     int64_t storage_sync_nanos_;
@@ -4778,106 +4646,6 @@ inline void AppendEntriesResponse::set_storage_copy_nanos(int64_t value) {
   // @@protoc_insertion_point(field_set:rpcproto.AppendEntriesResponse.storage_copy_nanos)
 }
 
-// int64 handle_ae_lock_wait_nanos = 8;
-inline void AppendEntriesResponse::clear_handle_ae_lock_wait_nanos() {
-  _impl_.handle_ae_lock_wait_nanos_ = int64_t{0};
-}
-inline int64_t AppendEntriesResponse::_internal_handle_ae_lock_wait_nanos() const {
-  return _impl_.handle_ae_lock_wait_nanos_;
-}
-inline int64_t AppendEntriesResponse::handle_ae_lock_wait_nanos() const {
-  // @@protoc_insertion_point(field_get:rpcproto.AppendEntriesResponse.handle_ae_lock_wait_nanos)
-  return _internal_handle_ae_lock_wait_nanos();
-}
-inline void AppendEntriesResponse::_internal_set_handle_ae_lock_wait_nanos(int64_t value) {
-  
-  _impl_.handle_ae_lock_wait_nanos_ = value;
-}
-inline void AppendEntriesResponse::set_handle_ae_lock_wait_nanos(int64_t value) {
-  _internal_set_handle_ae_lock_wait_nanos(value);
-  // @@protoc_insertion_point(field_set:rpcproto.AppendEntriesResponse.handle_ae_lock_wait_nanos)
-}
-
-// int64 handle_ae_pre_nanos = 9;
-inline void AppendEntriesResponse::clear_handle_ae_pre_nanos() {
-  _impl_.handle_ae_pre_nanos_ = int64_t{0};
-}
-inline int64_t AppendEntriesResponse::_internal_handle_ae_pre_nanos() const {
-  return _impl_.handle_ae_pre_nanos_;
-}
-inline int64_t AppendEntriesResponse::handle_ae_pre_nanos() const {
-  // @@protoc_insertion_point(field_get:rpcproto.AppendEntriesResponse.handle_ae_pre_nanos)
-  return _internal_handle_ae_pre_nanos();
-}
-inline void AppendEntriesResponse::_internal_set_handle_ae_pre_nanos(int64_t value) {
-  
-  _impl_.handle_ae_pre_nanos_ = value;
-}
-inline void AppendEntriesResponse::set_handle_ae_pre_nanos(int64_t value) {
-  _internal_set_handle_ae_pre_nanos(value);
-  // @@protoc_insertion_point(field_set:rpcproto.AppendEntriesResponse.handle_ae_pre_nanos)
-}
-
-// int64 handle_ae_lock_wait2_nanos = 10;
-inline void AppendEntriesResponse::clear_handle_ae_lock_wait2_nanos() {
-  _impl_.handle_ae_lock_wait2_nanos_ = int64_t{0};
-}
-inline int64_t AppendEntriesResponse::_internal_handle_ae_lock_wait2_nanos() const {
-  return _impl_.handle_ae_lock_wait2_nanos_;
-}
-inline int64_t AppendEntriesResponse::handle_ae_lock_wait2_nanos() const {
-  // @@protoc_insertion_point(field_get:rpcproto.AppendEntriesResponse.handle_ae_lock_wait2_nanos)
-  return _internal_handle_ae_lock_wait2_nanos();
-}
-inline void AppendEntriesResponse::_internal_set_handle_ae_lock_wait2_nanos(int64_t value) {
-  
-  _impl_.handle_ae_lock_wait2_nanos_ = value;
-}
-inline void AppendEntriesResponse::set_handle_ae_lock_wait2_nanos(int64_t value) {
-  _internal_set_handle_ae_lock_wait2_nanos(value);
-  // @@protoc_insertion_point(field_set:rpcproto.AppendEntriesResponse.handle_ae_lock_wait2_nanos)
-}
-
-// int64 handle_ae_post_nanos = 11;
-inline void AppendEntriesResponse::clear_handle_ae_post_nanos() {
-  _impl_.handle_ae_post_nanos_ = int64_t{0};
-}
-inline int64_t AppendEntriesResponse::_internal_handle_ae_post_nanos() const {
-  return _impl_.handle_ae_post_nanos_;
-}
-inline int64_t AppendEntriesResponse::handle_ae_post_nanos() const {
-  // @@protoc_insertion_point(field_get:rpcproto.AppendEntriesResponse.handle_ae_post_nanos)
-  return _internal_handle_ae_post_nanos();
-}
-inline void AppendEntriesResponse::_internal_set_handle_ae_post_nanos(int64_t value) {
-  
-  _impl_.handle_ae_post_nanos_ = value;
-}
-inline void AppendEntriesResponse::set_handle_ae_post_nanos(int64_t value) {
-  _internal_set_handle_ae_post_nanos(value);
-  // @@protoc_insertion_point(field_set:rpcproto.AppendEntriesResponse.handle_ae_post_nanos)
-}
-
-// int64 handle_ae_persist_nanos = 12;
-inline void AppendEntriesResponse::clear_handle_ae_persist_nanos() {
-  _impl_.handle_ae_persist_nanos_ = int64_t{0};
-}
-inline int64_t AppendEntriesResponse::_internal_handle_ae_persist_nanos() const {
-  return _impl_.handle_ae_persist_nanos_;
-}
-inline int64_t AppendEntriesResponse::handle_ae_persist_nanos() const {
-  // @@protoc_insertion_point(field_get:rpcproto.AppendEntriesResponse.handle_ae_persist_nanos)
-  return _internal_handle_ae_persist_nanos();
-}
-inline void AppendEntriesResponse::_internal_set_handle_ae_persist_nanos(int64_t value) {
-  
-  _impl_.handle_ae_persist_nanos_ = value;
-}
-inline void AppendEntriesResponse::set_handle_ae_persist_nanos(int64_t value) {
-  _internal_set_handle_ae_persist_nanos(value);
-  // @@protoc_insertion_point(field_set:rpcproto.AppendEntriesResponse.handle_ae_persist_nanos)
-}
-
 // uint64 push_map_hash = 13;
 inline void AppendEntriesResponse::clear_push_map_hash() {
   _impl_.push_map_hash_ = uint64_t{0u};
@@ -5853,26 +5621,6 @@ inline void ClientApplyTimedResponse::set_quorum_wait_nanos(int64_t value) {
   // @@protoc_insertion_point(field_set:rpcproto.ClientApplyTimedResponse.quorum_wait_nanos)
 }
 
-// int64 mutex_nanos = 9;
-inline void ClientApplyTimedResponse::clear_mutex_nanos() {
-  _impl_.mutex_nanos_ = int64_t{0};
-}
-inline int64_t ClientApplyTimedResponse::_internal_mutex_nanos() const {
-  return _impl_.mutex_nanos_;
-}
-inline int64_t ClientApplyTimedResponse::mutex_nanos() const {
-  // @@protoc_insertion_point(field_get:rpcproto.ClientApplyTimedResponse.mutex_nanos)
-  return _internal_mutex_nanos();
-}
-inline void ClientApplyTimedResponse::_internal_set_mutex_nanos(int64_t value) {
-  
-  _impl_.mutex_nanos_ = value;
-}
-inline void ClientApplyTimedResponse::set_mutex_nanos(int64_t value) {
-  _internal_set_mutex_nanos(value);
-  // @@protoc_insertion_point(field_set:rpcproto.ClientApplyTimedResponse.mutex_nanos)
-}
-
 // int64 total_nanos = 10;
 inline void ClientApplyTimedResponse::clear_total_nanos() {
   _impl_.total_nanos_ = int64_t{0};
@@ -5931,126 +5679,6 @@ inline void ClientApplyTimedResponse::_internal_set_retry_after_ms(int32_t value
 inline void ClientApplyTimedResponse::set_retry_after_ms(int32_t value) {
   _internal_set_retry_after_ms(value);
   // @@protoc_insertion_point(field_set:rpcproto.ClientApplyTimedResponse.retry_after_ms)
-}
-
-// int64 post_rpc_nanos = 13;
-inline void ClientApplyTimedResponse::clear_post_rpc_nanos() {
-  _impl_.post_rpc_nanos_ = int64_t{0};
-}
-inline int64_t ClientApplyTimedResponse::_internal_post_rpc_nanos() const {
-  return _impl_.post_rpc_nanos_;
-}
-inline int64_t ClientApplyTimedResponse::post_rpc_nanos() const {
-  // @@protoc_insertion_point(field_get:rpcproto.ClientApplyTimedResponse.post_rpc_nanos)
-  return _internal_post_rpc_nanos();
-}
-inline void ClientApplyTimedResponse::_internal_set_post_rpc_nanos(int64_t value) {
-  
-  _impl_.post_rpc_nanos_ = value;
-}
-inline void ClientApplyTimedResponse::set_post_rpc_nanos(int64_t value) {
-  _internal_set_post_rpc_nanos(value);
-  // @@protoc_insertion_point(field_set:rpcproto.ClientApplyTimedResponse.post_rpc_nanos)
-}
-
-// int64 commit_wait_nanos = 14;
-inline void ClientApplyTimedResponse::clear_commit_wait_nanos() {
-  _impl_.commit_wait_nanos_ = int64_t{0};
-}
-inline int64_t ClientApplyTimedResponse::_internal_commit_wait_nanos() const {
-  return _impl_.commit_wait_nanos_;
-}
-inline int64_t ClientApplyTimedResponse::commit_wait_nanos() const {
-  // @@protoc_insertion_point(field_get:rpcproto.ClientApplyTimedResponse.commit_wait_nanos)
-  return _internal_commit_wait_nanos();
-}
-inline void ClientApplyTimedResponse::_internal_set_commit_wait_nanos(int64_t value) {
-  
-  _impl_.commit_wait_nanos_ = value;
-}
-inline void ClientApplyTimedResponse::set_commit_wait_nanos(int64_t value) {
-  _internal_set_commit_wait_nanos(value);
-  // @@protoc_insertion_point(field_set:rpcproto.ClientApplyTimedResponse.commit_wait_nanos)
-}
-
-// int64 wg_scheduling_nanos = 15;
-inline void ClientApplyTimedResponse::clear_wg_scheduling_nanos() {
-  _impl_.wg_scheduling_nanos_ = int64_t{0};
-}
-inline int64_t ClientApplyTimedResponse::_internal_wg_scheduling_nanos() const {
-  return _impl_.wg_scheduling_nanos_;
-}
-inline int64_t ClientApplyTimedResponse::wg_scheduling_nanos() const {
-  // @@protoc_insertion_point(field_get:rpcproto.ClientApplyTimedResponse.wg_scheduling_nanos)
-  return _internal_wg_scheduling_nanos();
-}
-inline void ClientApplyTimedResponse::_internal_set_wg_scheduling_nanos(int64_t value) {
-  
-  _impl_.wg_scheduling_nanos_ = value;
-}
-inline void ClientApplyTimedResponse::set_wg_scheduling_nanos(int64_t value) {
-  _internal_set_wg_scheduling_nanos(value);
-  // @@protoc_insertion_point(field_set:rpcproto.ClientApplyTimedResponse.wg_scheduling_nanos)
-}
-
-// int64 mutex_a_nanos = 16;
-inline void ClientApplyTimedResponse::clear_mutex_a_nanos() {
-  _impl_.mutex_a_nanos_ = int64_t{0};
-}
-inline int64_t ClientApplyTimedResponse::_internal_mutex_a_nanos() const {
-  return _impl_.mutex_a_nanos_;
-}
-inline int64_t ClientApplyTimedResponse::mutex_a_nanos() const {
-  // @@protoc_insertion_point(field_get:rpcproto.ClientApplyTimedResponse.mutex_a_nanos)
-  return _internal_mutex_a_nanos();
-}
-inline void ClientApplyTimedResponse::_internal_set_mutex_a_nanos(int64_t value) {
-  
-  _impl_.mutex_a_nanos_ = value;
-}
-inline void ClientApplyTimedResponse::set_mutex_a_nanos(int64_t value) {
-  _internal_set_mutex_a_nanos(value);
-  // @@protoc_insertion_point(field_set:rpcproto.ClientApplyTimedResponse.mutex_a_nanos)
-}
-
-// int64 mutex_b_nanos = 17;
-inline void ClientApplyTimedResponse::clear_mutex_b_nanos() {
-  _impl_.mutex_b_nanos_ = int64_t{0};
-}
-inline int64_t ClientApplyTimedResponse::_internal_mutex_b_nanos() const {
-  return _impl_.mutex_b_nanos_;
-}
-inline int64_t ClientApplyTimedResponse::mutex_b_nanos() const {
-  // @@protoc_insertion_point(field_get:rpcproto.ClientApplyTimedResponse.mutex_b_nanos)
-  return _internal_mutex_b_nanos();
-}
-inline void ClientApplyTimedResponse::_internal_set_mutex_b_nanos(int64_t value) {
-  
-  _impl_.mutex_b_nanos_ = value;
-}
-inline void ClientApplyTimedResponse::set_mutex_b_nanos(int64_t value) {
-  _internal_set_mutex_b_nanos(value);
-  // @@protoc_insertion_point(field_set:rpcproto.ClientApplyTimedResponse.mutex_b_nanos)
-}
-
-// int64 mutex_c_nanos = 18;
-inline void ClientApplyTimedResponse::clear_mutex_c_nanos() {
-  _impl_.mutex_c_nanos_ = int64_t{0};
-}
-inline int64_t ClientApplyTimedResponse::_internal_mutex_c_nanos() const {
-  return _impl_.mutex_c_nanos_;
-}
-inline int64_t ClientApplyTimedResponse::mutex_c_nanos() const {
-  // @@protoc_insertion_point(field_get:rpcproto.ClientApplyTimedResponse.mutex_c_nanos)
-  return _internal_mutex_c_nanos();
-}
-inline void ClientApplyTimedResponse::_internal_set_mutex_c_nanos(int64_t value) {
-  
-  _impl_.mutex_c_nanos_ = value;
-}
-inline void ClientApplyTimedResponse::set_mutex_c_nanos(int64_t value) {
-  _internal_set_mutex_c_nanos(value);
-  // @@protoc_insertion_point(field_set:rpcproto.ClientApplyTimedResponse.mutex_c_nanos)
 }
 
 // int64 storage_read_nanos = 19;

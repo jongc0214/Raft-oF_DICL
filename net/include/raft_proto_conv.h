@@ -205,13 +205,6 @@ inline void append_entries_response_to_proto(const AppendEntriesResponse &g,
     p->set_handler_duration_nanos(g.handler_duration_ns);
     p->set_write_pba_rt_nanos(g.write_pba_rt_ns);
     p->set_storage_copy_nanos(g.storage_copy_ns);
-    /* 팔로워 서브스테이지: 팔로워가 이미 채워놓는데 와이어 필드가 없어서
-     * 리더의 ReplSample.handle_ae_*가 항상 0이던 것 */
-    p->set_handle_ae_lock_wait_nanos(g.handle_ae_lock_wait_ns);
-    p->set_handle_ae_pre_nanos(g.handle_ae_pre_ns);
-    p->set_handle_ae_lock_wait2_nanos(g.handle_ae_lock_wait2_ns);
-    p->set_handle_ae_post_nanos(g.handle_ae_post_ns);
-    p->set_handle_ae_persist_nanos(g.handle_ae_persist_ns);
     p->set_push_map_hash(g.push_map_hash);
     p->clear_extent_map();
     for (const auto &e : g.extent_map) {
@@ -235,11 +228,6 @@ inline void append_entries_response_from_proto(const rpcproto::AppendEntriesResp
     g.storage_read_ns = p.storage_read_nanos();
     g.storage_write_ns = p.storage_write_nanos();
     g.storage_sync_ns = p.storage_sync_nanos();
-    g.handle_ae_lock_wait_ns = p.handle_ae_lock_wait_nanos();
-    g.handle_ae_pre_ns = p.handle_ae_pre_nanos();
-    g.handle_ae_lock_wait2_ns = p.handle_ae_lock_wait2_nanos();
-    g.handle_ae_post_ns = p.handle_ae_post_nanos();
-    g.handle_ae_persist_ns = p.handle_ae_persist_nanos();
     g.push_map_hash = p.push_map_hash();
     g.extent_map.clear();
     g.extent_map.reserve(static_cast<size_t>(p.extent_map_size()));
@@ -300,16 +288,9 @@ inline void client_apply_timed_response_to_proto(const ClientApplyTimedResponse 
     p->set_repl_net_nanos(g.repl_net_ns);
     p->set_replication_nanos(g.replication_ns);
     p->set_quorum_wait_nanos(g.quorum_wait_ns);
-    p->set_mutex_nanos(g.mutex_ns);
-    p->set_mutex_a_nanos(g.mutex_a_ns);
-    p->set_mutex_b_nanos(g.mutex_b_ns);
-    p->set_mutex_c_nanos(g.mutex_c_ns);
     p->set_total_nanos(g.total_ns);
     p->set_busy(g.busy);
     p->set_retry_after_ms(g.retry_after_ms);
-    p->set_post_rpc_nanos(g.post_rpc_ns);
-    p->set_commit_wait_nanos(g.commit_wait_ns);
-    p->set_wg_scheduling_nanos(g.wg_scheduling_ns);
     p->set_storage_read_nanos(g.storage_read_ns);
     p->set_storage_write_nanos(g.storage_write_ns);
     p->set_storage_sync_nanos(g.storage_sync_ns);
@@ -325,16 +306,9 @@ inline void client_apply_timed_response_from_proto(const rpcproto::ClientApplyTi
     g.repl_net_ns = p.repl_net_nanos();
     g.replication_ns = p.replication_nanos();
     g.quorum_wait_ns = p.quorum_wait_nanos();
-    g.mutex_ns = p.mutex_nanos();
-    g.mutex_a_ns = p.mutex_a_nanos();
-    g.mutex_b_ns = p.mutex_b_nanos();
-    g.mutex_c_ns = p.mutex_c_nanos();
     g.total_ns = p.total_nanos();
     g.busy = p.busy();
     g.retry_after_ms = p.retry_after_ms();
-    g.post_rpc_ns = p.post_rpc_nanos();
-    g.commit_wait_ns = p.commit_wait_nanos();
-    g.wg_scheduling_ns = p.wg_scheduling_nanos();
     g.storage_read_ns = p.storage_read_nanos();
     g.storage_write_ns = p.storage_write_nanos();
     g.storage_sync_ns = p.storage_sync_nanos();

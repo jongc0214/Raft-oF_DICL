@@ -191,17 +191,21 @@ bool Server::record_push_completion(int fi, uint64_t epoch, uint64_t first, uint
 
 void Server::finish_push_job(int fi, uint64_t epoch, uint64_t first, uint64_t last,
                              const std::string &err, const std::shared_ptr<ReplSink> &sink) {
+#if RAFT_TIMING
     auto t_end = clock_type::now();
+#endif
     {
         std::lock_guard<std::mutex> lk(mu);
-        bool recorded = record_push_completion(fi, epoch, first, last, err);
+        [[maybe_unused]] bool recorded = record_push_completion(fi, epoch, first, last, err);
         /* 끝난 시각은 mu 안에서 적는다. 이 기록을 보고 Covered AE를 보내는
          * 워커는 mu(Lock B)를 잡은 뒤에야 움직이므로, 그 AE의 샘플이 push
          * 대기를 읽을 때는 이 시각이 이미 들어가 있다. (상자의 락은 mu 다음에
          * 잡는다 -- Lock C의 sink->push와 같은 순서) */
+#if RAFT_TIMING
         if (recorded && err.empty() && sink != nullptr) {
             sink->note_push_end(fi, t_end);
         }
+#endif
     }
     /* 결과를 버렸어도 깨운다 -- 워커가 지금 구간 기준으로 다시 가른다
      * (쓰는 중이라 기다리던 엔트리는 이제 pull로 간다). mu 밖에서 깨운다. */
