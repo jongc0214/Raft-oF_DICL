@@ -288,6 +288,24 @@ void Server::handle_append_entries_request(const AppendEntriesRequest &req,
             auto t_lock2 = clock_type::now();
             mu.lock();
             handle_ae_lock_wait2 = elapsed_ns(t_lock2);
+        } else if (replication_mode == ReplicationMode::Push) {
+            /* push: 리더가 이 배치를 내 볼륨에 이미 썼다(flush 없이). 내 연결로 같은
+             * 볼륨을 flush 해야 성공을 답할 수 있다 -- 리더는 이 응답으로만
+             * match_index 를 올린다(apply_ae_success). NVMe Flush 는 namespace 단위라
+             * 리더 연결로 완료된 쓰기도 덮는다(리더 쓰기 완료 -> AE 송신 -> 이 flush 순서).
+             * 측정값은 normal 모드처럼 StorageIO/SSync 칸에 넣는다. */
+            mu.unlock();
+            try {
+                auto t_sync = clock_type::now();
+                io.cached_fd->fdatasync_device();
+                const int64_t sync_ns = elapsed_ns(t_sync);
+                copy_result = DoPbaCopyResult{0, sync_ns, 0, 0, sync_ns};
+            } catch (const std::exception &) {
+                copy_failed = true;
+            }
+            auto t_lock2 = clock_type::now();
+            mu.lock();
+            handle_ae_lock_wait2 = elapsed_ns(t_lock2);
         }
         t_post = clock_type::now();
         t_post_set = true;

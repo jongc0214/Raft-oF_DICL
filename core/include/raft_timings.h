@@ -113,10 +113,10 @@ struct ApplyTimings {
 
     /* StorageIO 를 스토리지 서버가 나눠 보고한 pread / pwrite 합. 진단용이라
      * 항등식에 들어가지 않는다. StorageIO - (둘의 합) = 서버의 배치 처리 중
-     * 디스크 밖에서 쓴 시간 (워커가 하나일 때). push 된 배치는 0. */
+     * 디스크 밖에서 쓴 시간 (워커가 하나일 때). push 된 배치는 SRead=SWrite=0. */
     int64_t storage_read_ns = 0;
     int64_t storage_write_ns = 0;
-    int64_t storage_sync_ns = 0;   /* StorageIO 중 fdatasync. 진단용, push 된 배치는 0 */
+    int64_t storage_sync_ns = 0;   /* StorageIO 중 fdatasync. push 된 배치는 팔로워의 장치 flush (= StorageIO) */
 
     /* QuorumWait = replicate - AE_RT, clamp >= 0. Leader post-AE
      * bookkeeping + apply loop + wg.Wait + commit advance. Equals

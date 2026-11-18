@@ -384,8 +384,9 @@ void Server::append_entries_worker(int fi, ReplSink *sink, bool heartbeat_due) {
          * extent clamp를 다 거친 최종값이다 -- 배치가 리더 extent 하나 안에
          * 있고 wrap하지 않으므로 슬롯이 연속이고, 팔로워가 start_slot부터
          * 차례로 계산하는 슬롯이 리더가 push한 위치와 같다.
-         * 끝난 구간은 그 팔로워의 push 쓰기와 flush가 끝난 뒤에만 늘어나므로
-         * 이 AE 자체가 "네 볼륨에 내구성 있게 썼다"는 OK다 (A안, DECISIONS.md D20). */
+         * 끝난 구간은 그 팔로워의 push 쓰기가 끝난 뒤에만 늘어난다. flush 는 하지 않았으므로
+         * 팔로워가 이 AE 를 받고 자기 볼륨을 flush 한 뒤 성공을 답한다
+         * (handle_append_entries_request, DECISIONS.md D20 A안에서 flush 위치만 옮김). */
         /* skip/pull 계수(-debug)는 push 대상일 때만 센다 -- 대상이 아닌
          * 팔로워의 pull까지 세면 "대상인데도 pull로 간 배치"를 못 본다. */
         if (has_entries && is_push_target(fi)) {
@@ -536,6 +537,8 @@ void Server::append_entries_worker(int fi, ReplSink *sink, bool heartbeat_due) {
                 int64_t wait_ns = (sink != nullptr) ? sink->push_wait_ns(fi) : 0;
                 sample.write_pba_rt_ns = wait_ns;
                 sample.storage_copy_ns = wait_ns;
+                /* 팔로워가 이 AE 안에서 한 장치 flush. r2 안에 있고, 분해 때 FHandler 에서 빼 StorageIO 로 간다 */
+                sample.storage_sync_ns = rsp.storage_sync_ns;
             } else {
                 sample.write_pba_rt_ns = rsp.write_pba_rt_ns;
                 sample.storage_copy_ns = rsp.storage_copy_ns;

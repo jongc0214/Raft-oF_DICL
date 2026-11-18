@@ -378,8 +378,10 @@ Server::PersistPlan Server::persist_prepare_locked(int n_new_entries,
                         for (const PersistWrite &r : runs) {
                             pfd->write_at_logical(push_buf->data() + r.buf_off, r.len, r.dev_off);
                         }
-                        /* 블록 장치 flush 까지 끝나야 "팔로워 볼륨에 내구성 있게 있다" */
-                        pfd->fdatasync_device();
+                        /* flush 는 여기서 하지 않는다. 팔로워가 data_already_copied AE 를 받고
+                         * 자기 연결로 같은 볼륨을 flush 한 뒤 성공을 답한다
+                         * (handle_append_entries_request). 여기서 끝난 구간은 "썼다"일 뿐이다. */
+                        //  pfd->fdatasync_device();
                     } catch (const std::exception &e) {
                         err = e.what();
                     }

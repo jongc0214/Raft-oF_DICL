@@ -306,21 +306,23 @@ void derive_apply_timings(const ApplyWalls &w, ReplSink *sink,
             sample.write_pba_rt_ns -
             sample.storage_copy_ns);
  
+    /* push 된 배치: storage_copy_ns 는 push 대기라 LPersist 로 보내고, StorageIO 는
+     * 팔로워가 AE 핸들러 안에서 한 장치 flush(storage_sync_ns)다. */
     if (sample.pushed) {
         t.l_persist_ns += sample.storage_copy_ns;
-        t.storage_io_ns = 0;
+        t.storage_io_ns = sample.storage_sync_ns;
     }
     else t.storage_io_ns = sample.storage_copy_ns;
     
-    /* 진단용 분리값 (항등식 밖). push 된 배치는 0 */
+    /* 진단용 분리값 (항등식 밖). push 된 배치는 SRead=SWrite=0, SSync=StorageIO(팔로워 flush) */
     t.storage_read_ns = sample.storage_read_ns;
     t.storage_write_ns = sample.storage_write_ns;
     t.storage_sync_ns = sample.storage_sync_ns;
 
  
     /* [Push Integration] push 된 배치도 Leader-side 와 같은 모양이다: AE 전에 push 대기
-     * (write_pba_rt = storage_copy)가 있고, 팔로워는 복사를 하지 않으므로 핸들러 전체가
-     * FHandler 다. */
+     * (write_pba_rt = storage_copy)가 있고, 팔로워는 복사를 하지 않는다. 다만 팔로워가
+     * 핸들러 안에서 장치 flush 를 하는 지연은 StorageIO 다. */
     const bool pre_ae_copy = sample.leader_side || sample.pushed;
  
     if (pre_ae_copy) {
@@ -347,7 +349,9 @@ void derive_apply_timings(const ApplyWalls &w, ReplSink *sink,
          * follower handler 전체가 FHandler.
          */
         t.f_handler_ns =
-            sample.r2_ns;
+            sample.pushed
+                ? timings_clamp0(sample.r2_ns - sample.storage_sync_ns)
+                : sample.r2_ns;
  
         /*
          * leader-side copy와 AE RPC가 둘 다 replicate_ns에 포함되므로
