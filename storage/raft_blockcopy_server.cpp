@@ -308,7 +308,11 @@ WritePBABatchRsp BlockCopyServer::handle_write_pba_batch(const WritePBABatchReq 
             return rsp;
         }
 
-        if (::fdatasync(dst_fd) != 0) {
+        struct timespec sync_t0{}, sync_t1{};
+        clock_gettime(CLOCK_MONOTONIC_RAW, &sync_t0);
+        const int sync_rc = ::fdatasync(dst_fd);
+        clock_gettime(CLOCK_MONOTONIC_RAW, &sync_t1);
+        if (sync_rc != 0) {
             for (int i = 0; i < w; i++) {
                 buf_pool_.release(
                     bufs[static_cast<size_t>(i)],
@@ -328,6 +332,7 @@ WritePBABatchRsp BlockCopyServer::handle_write_pba_batch(const WritePBABatchReq 
 
         rsp.read_nanos = static_cast<int64_t>(total_read_ns);
         rsp.write_nanos = static_cast<int64_t>(total_write_ns);
+        rsp.sync_nanos = static_cast<int64_t>(ns_diff(sync_t0, sync_t1));
         rsp.copy_nanos = static_cast<int64_t>(ns_diff(batch_t0, batch_t1));
         std::lock_guard<std::mutex> lk(mu_);
         read_ns_ += total_read_ns;

@@ -74,6 +74,7 @@ public:
     int64_t copy_ns = 0;
     int64_t read_ns = 0;    /* copy_ns 중 pread 몫 */
     int64_t write_ns = 0;   /* copy_ns 중 pwrite 몫 */
+    int64_t sync_ns = 0;    /* copy_ns 중 fdatasync 몫 */
     std::string fail_with;
 
     bool write_pba_batch(const std::vector<uint64_t> &pba_srcs,
@@ -81,7 +82,7 @@ public:
                           const std::vector<uint64_t> &nbytes,
                           int src_dev, int dst_dev,
                           int64_t *out_copy_ns, int64_t *out_read_ns, int64_t *out_write_ns,
-                          std::string *out_error) override {
+                          int64_t *out_sync_ns, std::string *out_error) override {
         std::lock_guard<std::mutex> lk(mu);
         calls++;
         last_srcs = pba_srcs;
@@ -96,6 +97,7 @@ public:
         *out_copy_ns = copy_ns;
         *out_read_ns = read_ns;
         *out_write_ns = write_ns;
+        *out_sync_ns = sync_ns;
         return true;
     }
 

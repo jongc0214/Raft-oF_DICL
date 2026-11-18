@@ -99,6 +99,7 @@ inline void write_pba_batch_response_to_proto(const blockcopy::WritePBABatchRsp 
     p->set_copy_nanos(g.copy_nanos);
     p->set_read_nanos(g.read_nanos);
     p->set_write_nanos(g.write_nanos);
+    p->set_sync_nanos(g.sync_nanos);
 }
 
 inline blockcopy::WritePBABatchRsp write_pba_batch_response_from_proto(
@@ -108,6 +109,7 @@ inline blockcopy::WritePBABatchRsp write_pba_batch_response_from_proto(
     g.copy_nanos = p.copy_nanos();
     g.read_nanos = p.read_nanos();
     g.write_nanos = p.write_nanos();
+    g.sync_nanos = p.sync_nanos();
     return g;
 }
 
@@ -218,6 +220,7 @@ inline void append_entries_response_to_proto(const AppendEntriesResponse &g,
     p->set_volume_wwid(g.volume_wwid);
     p->set_storage_read_nanos(g.storage_read_ns);
     p->set_storage_write_nanos(g.storage_write_ns);
+    p->set_storage_sync_nanos(g.storage_sync_ns);
 }
 
 inline void append_entries_response_from_proto(const rpcproto::AppendEntriesResponse &p,
@@ -231,6 +234,7 @@ inline void append_entries_response_from_proto(const rpcproto::AppendEntriesResp
     g.storage_copy_ns = p.storage_copy_nanos();
     g.storage_read_ns = p.storage_read_nanos();
     g.storage_write_ns = p.storage_write_nanos();
+    g.storage_sync_ns = p.storage_sync_nanos();
     g.handle_ae_lock_wait_ns = p.handle_ae_lock_wait_nanos();
     g.handle_ae_pre_ns = p.handle_ae_pre_nanos();
     g.handle_ae_lock_wait2_ns = p.handle_ae_lock_wait2_nanos();
@@ -308,6 +312,7 @@ inline void client_apply_timed_response_to_proto(const ClientApplyTimedResponse 
     p->set_wg_scheduling_nanos(g.wg_scheduling_ns);
     p->set_storage_read_nanos(g.storage_read_ns);
     p->set_storage_write_nanos(g.storage_write_ns);
+    p->set_storage_sync_nanos(g.storage_sync_ns);
 }
 
 inline void client_apply_timed_response_from_proto(const rpcproto::ClientApplyTimedResponse &p,
@@ -332,6 +337,7 @@ inline void client_apply_timed_response_from_proto(const rpcproto::ClientApplyTi
     g.wg_scheduling_ns = p.wg_scheduling_nanos();
     g.storage_read_ns = p.storage_read_nanos();
     g.storage_write_ns = p.storage_write_nanos();
+    g.storage_sync_ns = p.storage_sync_nanos();
 }
 
 inline void client_echo_request_to_proto(const ClientEchoRequest &g,

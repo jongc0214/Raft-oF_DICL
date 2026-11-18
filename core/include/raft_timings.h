@@ -62,6 +62,7 @@ struct ProfilingSink {
     std::atomic<int64_t> sample_storage_copy_ns{0};
     std::atomic<int64_t> sample_storage_read_ns{0};
     std::atomic<int64_t> sample_storage_write_ns{0};
+    std::atomic<int64_t> sample_storage_sync_ns{0};
     std::atomic<int64_t> sample_mutex_ns{0};
     std::atomic<int64_t> sample_mutex_c_ns{0};
     
@@ -115,6 +116,7 @@ struct ApplyTimings {
      * 디스크 밖에서 쓴 시간 (워커가 하나일 때). push 된 배치는 0. */
     int64_t storage_read_ns = 0;
     int64_t storage_write_ns = 0;
+    int64_t storage_sync_ns = 0;   /* StorageIO 중 fdatasync. 진단용, push 된 배치는 0 */
 
     /* QuorumWait = replicate - AE_RT, clamp >= 0. Leader post-AE
      * bookkeeping + apply loop + wg.Wait + commit advance. Equals
@@ -180,6 +182,7 @@ struct ReplSample {
     int64_t storage_copy_ns = 0;  /* S internal pread+pwrite (Replication) */
     int64_t storage_read_ns = 0;  /* storage_copy_ns 중 pread 합 (destination 만) */
     int64_t storage_write_ns = 0; /* storage_copy_ns 중 pwrite 합 (destination 만) */
+    int64_t storage_sync_ns = 0;  /* storage_copy_ns 중 fdatasync */
     int64_t mutex_ns = 0;         /* sum of A+B+C lock waits */
     int64_t mutex_b_ns = 0;
     int64_t mutex_c_ns = 0;       /* Lock C wait alone (AE goroutine post-rpcCall) */

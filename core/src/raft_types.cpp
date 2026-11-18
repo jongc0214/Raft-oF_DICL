@@ -273,6 +273,8 @@ void derive_apply_timings(const ApplyWalls &w, ReplSink *sink,
             prof.sample_storage_read_ns.load();
         sample.storage_write_ns =
             prof.sample_storage_write_ns.load();
+        sample.storage_sync_ns =
+            prof.sample_storage_sync_ns.load();
         sample.mutex_ns = prof.sample_mutex_ns.load();
         sample.mutex_c_ns = prof.sample_mutex_c_ns.load();
  
@@ -309,6 +311,7 @@ void derive_apply_timings(const ApplyWalls &w, ReplSink *sink,
     /* 진단용 분리값 (항등식 밖). push 된 배치는 0 */
     t.storage_read_ns = sample.storage_read_ns;
     t.storage_write_ns = sample.storage_write_ns;
+    t.storage_sync_ns = sample.storage_sync_ns;
  
     /* [Push Integration] push 된 배치도 Leader-side 와 같은 모양이다: AE 전에 push 대기
      * (write_pba_rt = storage_copy)가 있고, 팔로워는 복사를 하지 않으므로 핸들러 전체가

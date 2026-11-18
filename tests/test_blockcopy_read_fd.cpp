@@ -68,6 +68,20 @@ WritePBABatchReq one_chunk_req(uint64_t nbytes) {
 
 }  /* namespace */
 
+TEST_CASE("WritePBABatch: fdatasync 시간을 따로 돌려주고 배치 wall 안에 든다") {
+    std::string src = make_file(0xAA);
+    std::string dst = make_file(0xEE);
+    {
+        BlockCopyServer server({open_rw(src), open_rw(dst)}, {src, dst}, 1);
+        WritePBABatchRsp rsp = server.handle_write_pba_batch(one_chunk_req(4096));
+        REQUIRE(rsp.error.empty());
+        CHECK(rsp.sync_nanos > 0);
+        CHECK(rsp.read_nanos + rsp.write_nanos + rsp.sync_nanos <= rsp.copy_nanos);
+    }
+    ::unlink(src.c_str());
+    ::unlink(dst.c_str());
+}
+
 TEST_CASE("open_device_for_read: 일반 파일만 버퍼드로, 그 밖은 -1") {
     std::string f = make_file(0x11);
     int rfd = open_device_for_read(f);

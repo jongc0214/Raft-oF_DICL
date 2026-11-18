@@ -100,6 +100,7 @@ public:
                                   int64_t *out_copy_ns,
                                   int64_t *out_read_ns,
                                   int64_t *out_write_ns,
+                                  int64_t *out_sync_ns,
                                   std::string *out_error) = 0;
 };
 

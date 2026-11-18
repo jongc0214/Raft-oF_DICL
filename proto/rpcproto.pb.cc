@@ -126,6 +126,7 @@ PROTOBUF_CONSTEXPR AppendEntriesResponse::AppendEntriesResponse(
   , /*decltype(_impl_.push_map_hash_)*/uint64_t{0u}
   , /*decltype(_impl_.storage_read_nanos_)*/int64_t{0}
   , /*decltype(_impl_.storage_write_nanos_)*/int64_t{0}
+  , /*decltype(_impl_.storage_sync_nanos_)*/int64_t{0}
   , /*decltype(_impl_.success_)*/false
   , /*decltype(_impl_._cached_size_)*/{}} {}
 struct AppendEntriesResponseDefaultTypeInternal {
@@ -164,6 +165,7 @@ PROTOBUF_CONSTEXPR WritePBABatchResponse::WritePBABatchResponse(
   , /*decltype(_impl_.copy_nanos_)*/int64_t{0}
   , /*decltype(_impl_.read_nanos_)*/int64_t{0}
   , /*decltype(_impl_.write_nanos_)*/int64_t{0}
+  , /*decltype(_impl_.sync_nanos_)*/int64_t{0}
   , /*decltype(_impl_._cached_size_)*/{}} {}
 struct WritePBABatchResponseDefaultTypeInternal {
   PROTOBUF_CONSTEXPR WritePBABatchResponseDefaultTypeInternal()
@@ -238,6 +240,7 @@ PROTOBUF_CONSTEXPR ClientApplyTimedResponse::ClientApplyTimedResponse(
   , /*decltype(_impl_.mutex_c_nanos_)*/int64_t{0}
   , /*decltype(_impl_.storage_read_nanos_)*/int64_t{0}
   , /*decltype(_impl_.storage_write_nanos_)*/int64_t{0}
+  , /*decltype(_impl_.storage_sync_nanos_)*/int64_t{0}
   , /*decltype(_impl_._cached_size_)*/{}} {}
 struct ClientApplyTimedResponseDefaultTypeInternal {
   PROTOBUF_CONSTEXPR ClientApplyTimedResponseDefaultTypeInternal()
@@ -439,6 +442,7 @@ const uint32_t TableStruct_rpcproto_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE
   PROTOBUF_FIELD_OFFSET(::rpcproto::AppendEntriesResponse, _impl_.volume_wwid_),
   PROTOBUF_FIELD_OFFSET(::rpcproto::AppendEntriesResponse, _impl_.storage_read_nanos_),
   PROTOBUF_FIELD_OFFSET(::rpcproto::AppendEntriesResponse, _impl_.storage_write_nanos_),
+  PROTOBUF_FIELD_OFFSET(::rpcproto::AppendEntriesResponse, _impl_.storage_sync_nanos_),
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::rpcproto::WritePBABatchRequest, _internal_metadata_),
   ~0u,  // no _extensions_
@@ -461,6 +465,7 @@ const uint32_t TableStruct_rpcproto_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE
   PROTOBUF_FIELD_OFFSET(::rpcproto::WritePBABatchResponse, _impl_.copy_nanos_),
   PROTOBUF_FIELD_OFFSET(::rpcproto::WritePBABatchResponse, _impl_.read_nanos_),
   PROTOBUF_FIELD_OFFSET(::rpcproto::WritePBABatchResponse, _impl_.write_nanos_),
+  PROTOBUF_FIELD_OFFSET(::rpcproto::WritePBABatchResponse, _impl_.sync_nanos_),
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::rpcproto::ClientApplyRequest, _internal_metadata_),
   ~0u,  // no _extensions_
@@ -511,6 +516,7 @@ const uint32_t TableStruct_rpcproto_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE
   PROTOBUF_FIELD_OFFSET(::rpcproto::ClientApplyTimedResponse, _impl_.mutex_c_nanos_),
   PROTOBUF_FIELD_OFFSET(::rpcproto::ClientApplyTimedResponse, _impl_.storage_read_nanos_),
   PROTOBUF_FIELD_OFFSET(::rpcproto::ClientApplyTimedResponse, _impl_.storage_write_nanos_),
+  PROTOBUF_FIELD_OFFSET(::rpcproto::ClientApplyTimedResponse, _impl_.storage_sync_nanos_),
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::rpcproto::ClientEchoRequest, _internal_metadata_),
   ~0u,  // no _extensions_
@@ -578,20 +584,20 @@ static const ::_pbi::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protode
   { 28, -1, -1, sizeof(::rpcproto::RequestVoteResponse)},
   { 36, -1, -1, sizeof(::rpcproto::AppendEntriesRequest)},
   { 57, -1, -1, sizeof(::rpcproto::AppendEntriesResponse)},
-  { 80, -1, -1, sizeof(::rpcproto::WritePBABatchRequest)},
-  { 92, -1, -1, sizeof(::rpcproto::WritePBABatchResponse)},
-  { 102, -1, -1, sizeof(::rpcproto::ClientApplyRequest)},
-  { 109, -1, -1, sizeof(::rpcproto::ClientApplyResponse)},
-  { 119, -1, -1, sizeof(::rpcproto::ClientApplyTimedRequest)},
-  { 126, -1, -1, sizeof(::rpcproto::ClientApplyTimedResponse)},
-  { 152, -1, -1, sizeof(::rpcproto::ClientEchoRequest)},
-  { 159, -1, -1, sizeof(::rpcproto::ClientEchoResponse)},
-  { 166, -1, -1, sizeof(::rpcproto::ClientGetCommitIndexRequest)},
-  { 172, -1, -1, sizeof(::rpcproto::ClientGetCommitIndexResponse)},
-  { 180, -1, -1, sizeof(::rpcproto::ClientGetHashRequest)},
-  { 187, -1, -1, sizeof(::rpcproto::ClientGetHashResponse)},
-  { 196, -1, -1, sizeof(::rpcproto::ClientGetAEBatchStatsRequest)},
-  { 202, -1, -1, sizeof(::rpcproto::ClientGetAEBatchStatsResponse)},
+  { 81, -1, -1, sizeof(::rpcproto::WritePBABatchRequest)},
+  { 93, -1, -1, sizeof(::rpcproto::WritePBABatchResponse)},
+  { 104, -1, -1, sizeof(::rpcproto::ClientApplyRequest)},
+  { 111, -1, -1, sizeof(::rpcproto::ClientApplyResponse)},
+  { 121, -1, -1, sizeof(::rpcproto::ClientApplyTimedRequest)},
+  { 128, -1, -1, sizeof(::rpcproto::ClientApplyTimedResponse)},
+  { 155, -1, -1, sizeof(::rpcproto::ClientEchoRequest)},
+  { 162, -1, -1, sizeof(::rpcproto::ClientEchoResponse)},
+  { 169, -1, -1, sizeof(::rpcproto::ClientGetCommitIndexRequest)},
+  { 175, -1, -1, sizeof(::rpcproto::ClientGetCommitIndexResponse)},
+  { 183, -1, -1, sizeof(::rpcproto::ClientGetHashRequest)},
+  { 190, -1, -1, sizeof(::rpcproto::ClientGetHashResponse)},
+  { 199, -1, -1, sizeof(::rpcproto::ClientGetAEBatchStatsRequest)},
+  { 205, -1, -1, sizeof(::rpcproto::ClientGetAEBatchStatsResponse)},
 };
 
 static const ::_pb::Message* const file_default_instances[] = {
@@ -635,7 +641,7 @@ const char descriptor_table_protodef_rpcproto_2eproto[] PROTOBUF_SECTION_VARIABL
   "\022\030\n\020leader_dev_index\030\013 \001(\005\022\033\n\023data_alrea"
   "dy_copied\030\r \001(\010\022\027\n\017need_extent_map\030\016 \001(\010"
   "\022\026\n\016inline_entries\030\017 \001(\010\022(\n\013entry_metas\030"
-  "\014 \003(\0132\023.rpcproto.EntryMeta\"\357\003\n\025AppendEnt"
+  "\014 \003(\0132\023.rpcproto.EntryMeta\"\213\004\n\025AppendEnt"
   "riesResponse\022\014\n\004term\030\001 \001(\004\022\017\n\007success\030\002 "
   "\001(\010\022\025\n\rconflict_term\030\003 \001(\004\022\026\n\016conflict_i"
   "ndex\030\004 \001(\004\022\036\n\026handler_duration_nanos\030\005 \001"
@@ -648,44 +654,46 @@ const char descriptor_table_protodef_rpcproto_2eproto[] PROTOBUF_SECTION_VARIABL
   " \001(\004\022(\n\nextent_map\030\016 \003(\0132\024.rpcproto.Ring"
   "Extent\022\023\n\013volume_wwid\030\017 \001(\t\022\032\n\022storage_r"
   "ead_nanos\030\020 \001(\003\022\033\n\023storage_write_nanos\030\021"
-  " \001(\003\"\200\001\n\024WritePBABatchRequest\022\020\n\010pba_src"
-  "s\030\001 \003(\004\022\020\n\010pba_dsts\030\002 \003(\004\022\016\n\006nbytes\030\003 \003("
-  "\004\022\022\n\nblock_size\030\004 \001(\004\022\017\n\007src_dev\030\005 \001(\005\022\017"
-  "\n\007dst_dev\030\006 \001(\005\"a\n\025WritePBABatchResponse"
-  "\022\013\n\003err\030\001 \001(\t\022\022\n\ncopy_nanos\030\002 \001(\003\022\022\n\nrea"
-  "d_nanos\030\003 \001(\003\022\023\n\013write_nanos\030\004 \001(\003\"&\n\022Cl"
-  "ientApplyRequest\022\020\n\010commands\030\001 \003(\014\"_\n\023Cl"
-  "ientApplyResponse\022\013\n\003err\030\001 \001(\t\022\014\n\004busy\030\002"
-  " \001(\010\022\026\n\016retry_after_ms\030\003 \001(\005\022\025\n\rlatency_"
-  "nanos\030\004 \001(\003\"+\n\027ClientApplyTimedRequest\022\020"
-  "\n\010commands\030\001 \003(\014\"\364\003\n\030ClientApplyTimedRes"
-  "ponse\022\013\n\003err\030\001 \001(\t\022\027\n\017l_handler_nanos\030\002 "
-  "\001(\003\022\027\n\017l_persist_nanos\030\003 \001(\003\022\024\n\014ae_net_n"
-  "anos\030\004 \001(\003\022\027\n\017f_handler_nanos\030\005 \001(\003\022\026\n\016r"
-  "epl_net_nanos\030\006 \001(\003\022\031\n\021replication_nanos"
-  "\030\007 \001(\003\022\031\n\021quorum_wait_nanos\030\010 \001(\003\022\023\n\013mut"
-  "ex_nanos\030\t \001(\003\022\023\n\013total_nanos\030\n \001(\003\022\014\n\004b"
-  "usy\030\013 \001(\010\022\026\n\016retry_after_ms\030\014 \001(\005\022\026\n\016pos"
-  "t_rpc_nanos\030\r \001(\003\022\031\n\021commit_wait_nanos\030\016"
-  " \001(\003\022\033\n\023wg_scheduling_nanos\030\017 \001(\003\022\025\n\rmut"
-  "ex_a_nanos\030\020 \001(\003\022\025\n\rmutex_b_nanos\030\021 \001(\003\022"
-  "\025\n\rmutex_c_nanos\030\022 \001(\003\022\032\n\022storage_read_n"
-  "anos\030\023 \001(\003\022\033\n\023storage_write_nanos\030\024 \001(\003\""
-  "%\n\021ClientEchoRequest\022\020\n\010commands\030\001 \003(\014\"\037"
-  "\n\022ClientEchoResponse\022\t\n\001n\030\001 \001(\003\"\035\n\033Clien"
-  "tGetCommitIndexRequest\"A\n\034ClientGetCommi"
-  "tIndexResponse\022\024\n\014commit_index\030\001 \001(\004\022\013\n\003"
-  "err\030\002 \001(\t\"(\n\024ClientGetHashRequest\022\020\n\010at_"
-  "count\030\001 \001(\004\"A\n\025ClientGetHashResponse\022\014\n\004"
-  "hash\030\001 \001(\t\022\r\n\005count\030\002 \001(\004\022\013\n\003err\030\003 \001(\t\"\036"
-  "\n\034ClientGetAEBatchStatsRequest\"R\n\035Client"
-  "GetAEBatchStatsResponse\022\020\n\010ae_count\030\001 \001("
-  "\004\022\022\n\nae_entries\030\002 \001(\004\022\013\n\003err\030\003 \001(\tB\026Z\024nv"
-  "meof_raft/rpcprotob\006proto3"
+  " \001(\003\022\032\n\022storage_sync_nanos\030\022 \001(\003\"\200\001\n\024Wri"
+  "tePBABatchRequest\022\020\n\010pba_srcs\030\001 \003(\004\022\020\n\010p"
+  "ba_dsts\030\002 \003(\004\022\016\n\006nbytes\030\003 \003(\004\022\022\n\nblock_s"
+  "ize\030\004 \001(\004\022\017\n\007src_dev\030\005 \001(\005\022\017\n\007dst_dev\030\006 "
+  "\001(\005\"u\n\025WritePBABatchResponse\022\013\n\003err\030\001 \001("
+  "\t\022\022\n\ncopy_nanos\030\002 \001(\003\022\022\n\nread_nanos\030\003 \001("
+  "\003\022\023\n\013write_nanos\030\004 \001(\003\022\022\n\nsync_nanos\030\005 \001"
+  "(\003\"&\n\022ClientApplyRequest\022\020\n\010commands\030\001 \003"
+  "(\014\"_\n\023ClientApplyResponse\022\013\n\003err\030\001 \001(\t\022\014"
+  "\n\004busy\030\002 \001(\010\022\026\n\016retry_after_ms\030\003 \001(\005\022\025\n\r"
+  "latency_nanos\030\004 \001(\003\"+\n\027ClientApplyTimedR"
+  "equest\022\020\n\010commands\030\001 \003(\014\"\220\004\n\030ClientApply"
+  "TimedResponse\022\013\n\003err\030\001 \001(\t\022\027\n\017l_handler_"
+  "nanos\030\002 \001(\003\022\027\n\017l_persist_nanos\030\003 \001(\003\022\024\n\014"
+  "ae_net_nanos\030\004 \001(\003\022\027\n\017f_handler_nanos\030\005 "
+  "\001(\003\022\026\n\016repl_net_nanos\030\006 \001(\003\022\031\n\021replicati"
+  "on_nanos\030\007 \001(\003\022\031\n\021quorum_wait_nanos\030\010 \001("
+  "\003\022\023\n\013mutex_nanos\030\t \001(\003\022\023\n\013total_nanos\030\n "
+  "\001(\003\022\014\n\004busy\030\013 \001(\010\022\026\n\016retry_after_ms\030\014 \001("
+  "\005\022\026\n\016post_rpc_nanos\030\r \001(\003\022\031\n\021commit_wait"
+  "_nanos\030\016 \001(\003\022\033\n\023wg_scheduling_nanos\030\017 \001("
+  "\003\022\025\n\rmutex_a_nanos\030\020 \001(\003\022\025\n\rmutex_b_nano"
+  "s\030\021 \001(\003\022\025\n\rmutex_c_nanos\030\022 \001(\003\022\032\n\022storag"
+  "e_read_nanos\030\023 \001(\003\022\033\n\023storage_write_nano"
+  "s\030\024 \001(\003\022\032\n\022storage_sync_nanos\030\025 \001(\003\"%\n\021C"
+  "lientEchoRequest\022\020\n\010commands\030\001 \003(\014\"\037\n\022Cl"
+  "ientEchoResponse\022\t\n\001n\030\001 \001(\003\"\035\n\033ClientGet"
+  "CommitIndexRequest\"A\n\034ClientGetCommitInd"
+  "exResponse\022\024\n\014commit_index\030\001 \001(\004\022\013\n\003err\030"
+  "\002 \001(\t\"(\n\024ClientGetHashRequest\022\020\n\010at_coun"
+  "t\030\001 \001(\004\"A\n\025ClientGetHashResponse\022\014\n\004hash"
+  "\030\001 \001(\t\022\r\n\005count\030\002 \001(\004\022\013\n\003err\030\003 \001(\t\"\036\n\034Cl"
+  "ientGetAEBatchStatsRequest\"R\n\035ClientGetA"
+  "EBatchStatsResponse\022\020\n\010ae_count\030\001 \001(\004\022\022\n"
+  "\nae_entries\030\002 \001(\004\022\013\n\003err\030\003 \001(\tB\026Z\024nvmeof"
+  "_raft/rpcprotob\006proto3"
   ;
 static ::_pbi::once_flag descriptor_table_rpcproto_2eproto_once;
 const ::_pbi::DescriptorTable descriptor_table_rpcproto_2eproto = {
-    false, false, 2546, descriptor_table_protodef_rpcproto_2eproto,
+    false, false, 2622, descriptor_table_protodef_rpcproto_2eproto,
     "rpcproto.proto",
     &descriptor_table_rpcproto_2eproto_once, nullptr, 0, 20,
     schemas, file_default_instances, TableStruct_rpcproto_2eproto::offsets,
@@ -2228,6 +2236,7 @@ AppendEntriesResponse::AppendEntriesResponse(const AppendEntriesResponse& from)
     , decltype(_impl_.push_map_hash_){}
     , decltype(_impl_.storage_read_nanos_){}
     , decltype(_impl_.storage_write_nanos_){}
+    , decltype(_impl_.storage_sync_nanos_){}
     , decltype(_impl_.success_){}
     , /*decltype(_impl_._cached_size_)*/{}};
 
@@ -2267,6 +2276,7 @@ inline void AppendEntriesResponse::SharedCtor(
     , decltype(_impl_.push_map_hash_){uint64_t{0u}}
     , decltype(_impl_.storage_read_nanos_){int64_t{0}}
     , decltype(_impl_.storage_write_nanos_){int64_t{0}}
+    , decltype(_impl_.storage_sync_nanos_){int64_t{0}}
     , decltype(_impl_.success_){false}
     , /*decltype(_impl_._cached_size_)*/{}
   };
@@ -2458,6 +2468,14 @@ const char* AppendEntriesResponse::_InternalParse(const char* ptr, ::_pbi::Parse
         } else
           goto handle_unusual;
         continue;
+      // int64 storage_sync_nanos = 18;
+      case 18:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 144)) {
+          _impl_.storage_sync_nanos_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -2595,6 +2613,12 @@ uint8_t* AppendEntriesResponse::_InternalSerialize(
     target = ::_pbi::WireFormatLite::WriteInt64ToArray(17, this->_internal_storage_write_nanos(), target);
   }
 
+  // int64 storage_sync_nanos = 18;
+  if (this->_internal_storage_sync_nanos() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt64ToArray(18, this->_internal_storage_sync_nanos(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = ::_pbi::WireFormat::InternalSerializeUnknownFieldsToArray(
         _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance), target, stream);
@@ -2699,6 +2723,13 @@ size_t AppendEntriesResponse::ByteSizeLong() const {
         this->_internal_storage_write_nanos());
   }
 
+  // int64 storage_sync_nanos = 18;
+  if (this->_internal_storage_sync_nanos() != 0) {
+    total_size += 2 +
+      ::_pbi::WireFormatLite::Int64Size(
+        this->_internal_storage_sync_nanos());
+  }
+
   // bool success = 2;
   if (this->_internal_success() != 0) {
     total_size += 1 + 1;
@@ -2767,6 +2798,9 @@ void AppendEntriesResponse::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, 
   }
   if (from._internal_storage_write_nanos() != 0) {
     _this->_internal_set_storage_write_nanos(from._internal_storage_write_nanos());
+  }
+  if (from._internal_storage_sync_nanos() != 0) {
+    _this->_internal_set_storage_sync_nanos(from._internal_storage_sync_nanos());
   }
   if (from._internal_success() != 0) {
     _this->_internal_set_success(from._internal_success());
@@ -3190,6 +3224,7 @@ WritePBABatchResponse::WritePBABatchResponse(const WritePBABatchResponse& from)
     , decltype(_impl_.copy_nanos_){}
     , decltype(_impl_.read_nanos_){}
     , decltype(_impl_.write_nanos_){}
+    , decltype(_impl_.sync_nanos_){}
     , /*decltype(_impl_._cached_size_)*/{}};
 
   _internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
@@ -3202,8 +3237,8 @@ WritePBABatchResponse::WritePBABatchResponse(const WritePBABatchResponse& from)
       _this->GetArenaForAllocation());
   }
   ::memcpy(&_impl_.copy_nanos_, &from._impl_.copy_nanos_,
-    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.write_nanos_) -
-    reinterpret_cast<char*>(&_impl_.copy_nanos_)) + sizeof(_impl_.write_nanos_));
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.sync_nanos_) -
+    reinterpret_cast<char*>(&_impl_.copy_nanos_)) + sizeof(_impl_.sync_nanos_));
   // @@protoc_insertion_point(copy_constructor:rpcproto.WritePBABatchResponse)
 }
 
@@ -3216,6 +3251,7 @@ inline void WritePBABatchResponse::SharedCtor(
     , decltype(_impl_.copy_nanos_){int64_t{0}}
     , decltype(_impl_.read_nanos_){int64_t{0}}
     , decltype(_impl_.write_nanos_){int64_t{0}}
+    , decltype(_impl_.sync_nanos_){int64_t{0}}
     , /*decltype(_impl_._cached_size_)*/{}
   };
   _impl_.err_.InitDefault();
@@ -3250,8 +3286,8 @@ void WritePBABatchResponse::Clear() {
 
   _impl_.err_.ClearToEmpty();
   ::memset(&_impl_.copy_nanos_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&_impl_.write_nanos_) -
-      reinterpret_cast<char*>(&_impl_.copy_nanos_)) + sizeof(_impl_.write_nanos_));
+      reinterpret_cast<char*>(&_impl_.sync_nanos_) -
+      reinterpret_cast<char*>(&_impl_.copy_nanos_)) + sizeof(_impl_.sync_nanos_));
   _internal_metadata_.Clear<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
 }
 
@@ -3291,6 +3327,14 @@ const char* WritePBABatchResponse::_InternalParse(const char* ptr, ::_pbi::Parse
       case 4:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 32)) {
           _impl_.write_nanos_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // int64 sync_nanos = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 40)) {
+          _impl_.sync_nanos_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -3352,6 +3396,12 @@ uint8_t* WritePBABatchResponse::_InternalSerialize(
     target = ::_pbi::WireFormatLite::WriteInt64ToArray(4, this->_internal_write_nanos(), target);
   }
 
+  // int64 sync_nanos = 5;
+  if (this->_internal_sync_nanos() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt64ToArray(5, this->_internal_sync_nanos(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = ::_pbi::WireFormat::InternalSerializeUnknownFieldsToArray(
         _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance), target, stream);
@@ -3390,6 +3440,11 @@ size_t WritePBABatchResponse::ByteSizeLong() const {
     total_size += ::_pbi::WireFormatLite::Int64SizePlusOne(this->_internal_write_nanos());
   }
 
+  // int64 sync_nanos = 5;
+  if (this->_internal_sync_nanos() != 0) {
+    total_size += ::_pbi::WireFormatLite::Int64SizePlusOne(this->_internal_sync_nanos());
+  }
+
   return MaybeComputeUnknownFieldsSize(total_size, &_impl_._cached_size_);
 }
 
@@ -3420,6 +3475,9 @@ void WritePBABatchResponse::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, 
   if (from._internal_write_nanos() != 0) {
     _this->_internal_set_write_nanos(from._internal_write_nanos());
   }
+  if (from._internal_sync_nanos() != 0) {
+    _this->_internal_set_sync_nanos(from._internal_sync_nanos());
+  }
   _this->_internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
 }
 
@@ -3444,8 +3502,8 @@ void WritePBABatchResponse::InternalSwap(WritePBABatchResponse* other) {
       &other->_impl_.err_, rhs_arena
   );
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(WritePBABatchResponse, _impl_.write_nanos_)
-      + sizeof(WritePBABatchResponse::_impl_.write_nanos_)
+      PROTOBUF_FIELD_OFFSET(WritePBABatchResponse, _impl_.sync_nanos_)
+      + sizeof(WritePBABatchResponse::_impl_.sync_nanos_)
       - PROTOBUF_FIELD_OFFSET(WritePBABatchResponse, _impl_.copy_nanos_)>(
           reinterpret_cast<char*>(&_impl_.copy_nanos_),
           reinterpret_cast<char*>(&other->_impl_.copy_nanos_));
@@ -4150,6 +4208,7 @@ ClientApplyTimedResponse::ClientApplyTimedResponse(const ClientApplyTimedRespons
     , decltype(_impl_.mutex_c_nanos_){}
     , decltype(_impl_.storage_read_nanos_){}
     , decltype(_impl_.storage_write_nanos_){}
+    , decltype(_impl_.storage_sync_nanos_){}
     , /*decltype(_impl_._cached_size_)*/{}};
 
   _internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
@@ -4162,8 +4221,8 @@ ClientApplyTimedResponse::ClientApplyTimedResponse(const ClientApplyTimedRespons
       _this->GetArenaForAllocation());
   }
   ::memcpy(&_impl_.l_handler_nanos_, &from._impl_.l_handler_nanos_,
-    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.storage_write_nanos_) -
-    reinterpret_cast<char*>(&_impl_.l_handler_nanos_)) + sizeof(_impl_.storage_write_nanos_));
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.storage_sync_nanos_) -
+    reinterpret_cast<char*>(&_impl_.l_handler_nanos_)) + sizeof(_impl_.storage_sync_nanos_));
   // @@protoc_insertion_point(copy_constructor:rpcproto.ClientApplyTimedResponse)
 }
 
@@ -4192,6 +4251,7 @@ inline void ClientApplyTimedResponse::SharedCtor(
     , decltype(_impl_.mutex_c_nanos_){int64_t{0}}
     , decltype(_impl_.storage_read_nanos_){int64_t{0}}
     , decltype(_impl_.storage_write_nanos_){int64_t{0}}
+    , decltype(_impl_.storage_sync_nanos_){int64_t{0}}
     , /*decltype(_impl_._cached_size_)*/{}
   };
   _impl_.err_.InitDefault();
@@ -4226,8 +4286,8 @@ void ClientApplyTimedResponse::Clear() {
 
   _impl_.err_.ClearToEmpty();
   ::memset(&_impl_.l_handler_nanos_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&_impl_.storage_write_nanos_) -
-      reinterpret_cast<char*>(&_impl_.l_handler_nanos_)) + sizeof(_impl_.storage_write_nanos_));
+      reinterpret_cast<char*>(&_impl_.storage_sync_nanos_) -
+      reinterpret_cast<char*>(&_impl_.l_handler_nanos_)) + sizeof(_impl_.storage_sync_nanos_));
   _internal_metadata_.Clear<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
 }
 
@@ -4399,6 +4459,14 @@ const char* ClientApplyTimedResponse::_InternalParse(const char* ptr, ::_pbi::Pa
         } else
           goto handle_unusual;
         continue;
+      // int64 storage_sync_nanos = 21;
+      case 21:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 168)) {
+          _impl_.storage_sync_nanos_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -4552,6 +4620,12 @@ uint8_t* ClientApplyTimedResponse::_InternalSerialize(
     target = ::_pbi::WireFormatLite::WriteInt64ToArray(20, this->_internal_storage_write_nanos(), target);
   }
 
+  // int64 storage_sync_nanos = 21;
+  if (this->_internal_storage_sync_nanos() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt64ToArray(21, this->_internal_storage_sync_nanos(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = ::_pbi::WireFormat::InternalSerializeUnknownFieldsToArray(
         _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance), target, stream);
@@ -4680,6 +4754,13 @@ size_t ClientApplyTimedResponse::ByteSizeLong() const {
         this->_internal_storage_write_nanos());
   }
 
+  // int64 storage_sync_nanos = 21;
+  if (this->_internal_storage_sync_nanos() != 0) {
+    total_size += 2 +
+      ::_pbi::WireFormatLite::Int64Size(
+        this->_internal_storage_sync_nanos());
+  }
+
   return MaybeComputeUnknownFieldsSize(total_size, &_impl_._cached_size_);
 }
 
@@ -4758,6 +4839,9 @@ void ClientApplyTimedResponse::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_ms
   if (from._internal_storage_write_nanos() != 0) {
     _this->_internal_set_storage_write_nanos(from._internal_storage_write_nanos());
   }
+  if (from._internal_storage_sync_nanos() != 0) {
+    _this->_internal_set_storage_sync_nanos(from._internal_storage_sync_nanos());
+  }
   _this->_internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
 }
 
@@ -4782,8 +4866,8 @@ void ClientApplyTimedResponse::InternalSwap(ClientApplyTimedResponse* other) {
       &other->_impl_.err_, rhs_arena
   );
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(ClientApplyTimedResponse, _impl_.storage_write_nanos_)
-      + sizeof(ClientApplyTimedResponse::_impl_.storage_write_nanos_)
+      PROTOBUF_FIELD_OFFSET(ClientApplyTimedResponse, _impl_.storage_sync_nanos_)
+      + sizeof(ClientApplyTimedResponse::_impl_.storage_sync_nanos_)
       - PROTOBUF_FIELD_OFFSET(ClientApplyTimedResponse, _impl_.l_handler_nanos_)>(
           reinterpret_cast<char*>(&_impl_.l_handler_nanos_),
           reinterpret_cast<char*>(&other->_impl_.l_handler_nanos_));

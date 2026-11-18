@@ -90,6 +90,7 @@ bool dispatch_client_method(const std::string &method,
         rsp.wg_scheduling_ns = t.wg_scheduling_ns;
         rsp.storage_read_ns = t.storage_read_ns;
         rsp.storage_write_ns = t.storage_write_ns;
+        rsp.storage_sync_ns = t.storage_sync_ns;
 
         rpcproto::ClientApplyTimedResponse proto_rsp;
         client_apply_timed_response_to_proto(rsp, &proto_rsp);

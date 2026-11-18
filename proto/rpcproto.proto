@@ -106,6 +106,9 @@ message AppendEntriesResponse {
   // Additive; peers that predate them report 0. Same numbers as branch jongc.
   int64 storage_read_nanos = 16;
   int64 storage_write_nanos = 17;
+  // The storage server's fdatasync(dst) (WritePBABatchResponse.sync_nanos).
+  // Normal mode: the follower's own ring fdatasync.
+  int64 storage_sync_nanos = 18;
 }
 
 // ---- Blockcopy RPCs (rpc_rdma.go WritePBABatchRequest/Response 대응) ----
@@ -125,15 +128,19 @@ message WritePBABatchRequest {
 
 message WritePBABatchResponse {
   string err = 1;
-  // Sum of per-entry (read_ns + write_ns) across batch workers.
+  // Batch wall on the storage server: worker spawn -> pread/pwrite -> join
+  // -> fdatasync(dst).
   int64 copy_nanos = 2;
-  // The same sum split by direction: read_nanos + write_nanos == copy_nanos.
-  // CopyNanos alone cannot say whether a local-vs-NVMe-oF latency gap sits on
-  // the pread or the pwrite side, which is the whole question the blockcopy
-  // latency experiment asks. Additive field numbers, so this stays wire
-  // compatible with peers that predate them (they simply report 0).
+  // pread / pwrite time summed over workers. CopyNanos alone cannot say
+  // whether a local-vs-NVMe-oF latency gap sits on the pread or the pwrite
+  // side, which is the whole question the blockcopy latency experiment asks.
+  // With one worker, copy - (read + write + sync) = server-side overhead
+  // (thread spawn/join, buffer pool). Additive field numbers, so this stays
+  // wire compatible with peers that predate them (they simply report 0).
   int64 read_nanos = 3;
   int64 write_nanos = 4;
+  // The final fdatasync(dst) alone.
+  int64 sync_nanos = 5;
 }
 
 // ---- Client-facing RPCs ----
@@ -179,6 +186,8 @@ message ClientApplyTimedResponse {
   // (Branch jongc used 16/17 here; those are mutex_a/b on this branch.)
   int64 storage_read_nanos = 19;
   int64 storage_write_nanos = 20;
+  // StorageIO's fdatasync part. Diagnostic only, 0 for pushed batches.
+  int64 storage_sync_nanos = 21;
 }
 
 message ClientEchoRequest {

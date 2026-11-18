@@ -383,6 +383,7 @@ public:
         int64_t storage_copy_ns;
         int64_t storage_read_ns;    /* storage_copy_ns 중 pread 합 */
         int64_t storage_write_ns;   /* storage_copy_ns 중 pwrite 합 */
+        int64_t storage_sync_ns;    /* storage_copy_ns 중 fdatasync */
     };
     DoPbaCopyResult do_pba_copy(uint64_t leader_pba_src, uint64_t log_block_length,
                                 uint64_t dst_slot, int src_dev, int dst_dev);

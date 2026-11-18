@@ -102,15 +102,18 @@ struct WritePBABatchReq {
     uint64_t block_size = 0;
     int src_dev = 0, dst_dev = 0;
 };
-/* copy_nanos 는 read_nanos + write_nanos 다. 방향별로도 따로 돌려주는 이유:
- * 로컬 PCIe 복사와 NVMe-oF attach 볼륨 복사의 지연 차이가 pread 쪽인지
- * pwrite 쪽인지는 합계만으로는 알 수 없다 (blkcopy 벤치가 묻는 질문이 정확히
- * 그것이다). 서버는 이미 total_read_ns / total_write_ns 를 따로 들고 있었고,
- * 합치기 전 값을 그대로 실어 보내는 것뿐이라 측정 비용은 0이다. */
+/* copy_nanos 는 배치 wall 이다: 워커 생성 -> pread/pwrite -> join -> fdatasync.
+ * read_nanos / write_nanos 는 워커별 pread / pwrite 시간의 합, sync_nanos 는
+ * 마지막 fdatasync(dst) 하나의 시간이다. 워커가 하나면
+ *   copy_nanos - (read + write + sync) = 워커 생성/join + 버퍼 풀 등 서버 내부 오버헤드.
+ * 워커가 여럿이면 read/write 는 겹친 시간의 합이라 copy_nanos 보다 클 수 있다.
+ * 방향별로 나누는 이유: 로컬 PCIe 복사와 NVMe-oF attach 볼륨 복사의 지연 차이가
+ * pread 쪽인지 pwrite 쪽인지는 합계만으로는 알 수 없다 (blkcopy 벤치가 묻는 질문). */
 struct WritePBABatchRsp {
     std::string error;
     int64_t copy_nanos = 0;
     int64_t read_nanos = 0, write_nanos = 0;
+    int64_t sync_nanos = 0;
 };
 
 struct GetTimeRsp { uint64_t read_nanos = 0, write_nanos = 0, other_nanos = 0; };

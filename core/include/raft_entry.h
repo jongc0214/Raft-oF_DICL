@@ -236,6 +236,7 @@ struct AppendEntriesResponse {
      * storage_copy_ns 는 서버의 배치 wall 이라 그 차이가 서버 쪽 대기다. */
     int64_t storage_read_ns = 0;
     int64_t storage_write_ns = 0;
+    int64_t storage_sync_ns = 0;     /* fdatasync(dst). normal 모드는 자기 링 fdatasync */
 
     /* HandleAppendEntriesRequest follower 서브스테이지 계측 */
     int64_t handle_ae_lock_wait_ns = 0;   /* entry -> mu.Lock() 획득 */
@@ -301,6 +302,7 @@ struct ClientApplyTimedResponse {
     int64_t wg_scheduling_ns = 0;
     int64_t storage_read_ns = 0;    /* StorageIO 중 pread 합 */
     int64_t storage_write_ns = 0;   /* StorageIO 중 pwrite 합 */
+    int64_t storage_sync_ns = 0;    /* StorageIO 중 fdatasync */
 };
 
 struct ClientEchoRequest {
