@@ -818,7 +818,6 @@ batch
 ring_pages
 heartbeat_ms
 ae_batch
-copy_workers
 raft_addrs
 cluster
 profiling
@@ -1193,7 +1192,6 @@ batch
 ring_pages
 heartbeat_ms
 ae_batch
-copy_workers
 warm-up
 leader placement
 storage topology

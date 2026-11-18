@@ -72,7 +72,7 @@ TEST_CASE("WritePBABatch: fdatasync 시간을 따로 돌려주고 배치 wall �
     std::string src = make_file(0xAA);
     std::string dst = make_file(0xEE);
     {
-        BlockCopyServer server({open_rw(src), open_rw(dst)}, {src, dst}, 1);
+        BlockCopyServer server({open_rw(src), open_rw(dst)}, {src, dst});
         WritePBABatchRsp rsp = server.handle_write_pba_batch(one_chunk_req(4096));
         REQUIRE(rsp.error.empty());
         CHECK(rsp.sync_nanos > 0);
@@ -103,7 +103,7 @@ TEST_CASE("WritePBABatch: src는 읽기 fd에서, dst는 쓰기 fd로") {
     std::string dst   = make_file(0xEE);   /* 장치 1 */
 
     {
-        BlockCopyServer server({open_rw(src_w), open_rw(dst)}, {src_w, dst}, 1,
+        BlockCopyServer server({open_rw(src_w), open_rw(dst)}, {src_w, dst},
                                {::open(src_r.c_str(), O_RDONLY), -1});
         WritePBABatchRsp rsp = server.handle_write_pba_batch(one_chunk_req(4096));
         REQUIRE(rsp.error.empty());
@@ -126,7 +126,7 @@ TEST_CASE("WritePBABatch: 읽기 fd가 없으면 쓰기 fd로 읽는다 (블록 
     std::string src = make_file(0xAA);
     std::string dst = make_file(0xEE);
     {
-        BlockCopyServer server({open_rw(src), open_rw(dst)}, {src, dst}, 1);
+        BlockCopyServer server({open_rw(src), open_rw(dst)}, {src, dst});
         WritePBABatchRsp rsp = server.handle_write_pba_batch(one_chunk_req(4096));
         REQUIRE(rsp.error.empty());
     }
@@ -141,7 +141,7 @@ TEST_CASE("WritePBABatch: 읽기 fd가 없으면 쓰기 fd로 읽는다 (블록 
 
 TEST_CASE("WritePBABatch: src 장치 번호가 범위 밖이면 에러") {
     std::string a = make_file(0x01);
-    BlockCopyServer server({open_rw(a)}, {a}, 1, {-1});
+    BlockCopyServer server({open_rw(a)}, {a}, {-1});
     WritePBABatchReq req = one_chunk_req(4096);
     req.dst_dev = 0;
     req.src_dev = 3;

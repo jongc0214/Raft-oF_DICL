@@ -121,7 +121,7 @@ else
 fi
 
 CXXFLAGS=(-std=$STD -Wall -Wextra -O2 "${INCLUDES[@]}")
-LDFLAGS=(-lpthread -lrdmacm -libverbs)
+LDFLAGS=(-lpthread -lrdmacm -libverbs -luring)
 
 # 단일 바이너리 빌드 헬퍼: build_bin <out> <src...>
 build_bin() {

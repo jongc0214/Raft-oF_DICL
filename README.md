@@ -139,7 +139,7 @@ export PROTOBUF_SYSROOT=/tmp/pb-sysroot
 
 # 스토리지 노드 (호스트마다 하나). -devices 는 반드시 "클러스터 인덱스 순서"
 ./build/raft_blockcopy_server -addr 0.0.0.0:5050 \
-  -devices /dev/nvme0n1,/dev/nvme1n1,/dev/nvme2n1 -copy-workers 8
+  -devices /dev/nvme0n1,/dev/nvme1n1,/dev/nvme2n1
 ```
 
 `-cluster` 형식은 **`id@raft_addr@device_path@storage_host`** (쉼표 구분)이고,
@@ -232,7 +232,7 @@ grep -E 'ERROR: AddressSanitizer|runtime error' <노드 로그>
 
 # 스토리지 노드
 ./build/raft_blockcopy_server -addr 0.0.0.0:5050 \
-  -devices /dev/nvme0n1,/dev/nvme1n1,/dev/nvme2n1 -copy-workers 8
+  -devices /dev/nvme0n1,/dev/nvme1n1,/dev/nvme2n1
 ```
 
 `-ring-pages` 기본값은 8Mi 페이지 = **32GiB/노드**다. fallocate와
@@ -299,7 +299,7 @@ HTTP CONNECT + 길이 프레이밍, RDMA 는 SEND 메시지 하나가 프레임 
 | `-debug` | off | 1초 간격 상태 덤프 |
 
 **`raft_blockcopy_server`**: `-addr` (기본 `0.0.0.0:5050`),
-`-devices` (쉼표 구분, 클러스터 인덱스 순서), `-copy-workers` (기본 nproc, 최대 16),
+`-devices` (쉼표 구분, 클러스터 인덱스 순서),
 `-transport rdma|tcp` (기본 **rdma**)
 
 **`raft_client`**: `-addrs`, `-op apply|apply-timed|echo|commit-index|hash|ae-stats`,

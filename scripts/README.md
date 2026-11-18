@@ -8,21 +8,22 @@
 복제 경로를 끝까지 확인하려면 실클러스터에서 돌려야 한다 —— 절차서는
 저장소 루트의 `E2E_EXPERIMENT.md`.
 
-## `blkcopy_scaling.sh` — blockcopy 병렬도·배치 스케일링 실험
+## `blkcopy_scaling.sh` — blockcopy 배치·청크 스케일링 실험
 
 e2e 테스트가 아니라 **측정 도구**다. CTest 에 등록하지 않는다 (실제 장치가
 필요하고 목적지를 덮어쓴다).
 
-묻는 것: **스토리지 노드를 `-copy-workers` 몇으로 운영해야 하는가**, 그리고
-실제 Raft 경로가 만드는 배치 크기에서 그 값이 의미가 있는가.
+묻는 것: blockcopy 처리량이 RPC 당 청크 수(B)와 청크 크기에 따라 어떻게
+확장되고 어디서 포화하는가.
 
 ```bash
 ARM_LABEL=A-local ./scripts/blkcopy_scaling.sh [출력디렉터리]
 ```
 
-축 3개를 훑는다. W = 서버의 `-copy-workers`, B = 벤치의 `-batch`, 그리고 청크 크기.
+축 2개를 훑는다. B = 벤치의 `-batch`, 그리고 청크 크기. (예전의 W = 서버
+`-copy-workers` 축은 워커 스레드와 함께 2026-11-18 에 없어졌다.)
 호스트·경로·스윕 범위는 **전부 환경변수**다 (`STORAGE_HOST` / `SRC_FILE` /
-`DST_FILE` / `WORKERS` / `BATCHES` / `CHUNKS` / `TARGET_BYTES` / `PORT` …).
+`DST_FILE` / `BATCHES` / `CHUNKS` / `TARGET_BYTES` / `PORT` …).
 스크립트 머리 주석에 전체 목록이 있다.
 
 **하드코딩된 arm 표를 두지 않는 것이 의도**다. 예전 `blkcopy_latency.sh` 는 arm
@@ -32,15 +33,15 @@ ARM_LABEL=A-local ./scripts/blkcopy_scaling.sh [출력디렉터리]
 
 ### 구조적으로 알고 시작하는 것
 
-`storage/raft_blockcopy_server.cpp` 를 읽으면 세 가지가 미리 보인다:
+`storage/raft_blockcopy_server.cpp` 의 `handle_write_pba_batch` 를 읽으면 두 가지가 미리 보인다:
 
-- **`w = min(copy_workers_, count)`** (`:208`) — 배치가 병렬도의 상한이다.
-  따라서 **W > B 구간은 W = B 와 같아야 하고**, 안 그러면 계측이 틀린 것이다
-  (W 가 서버에 안 먹었다는 뜻 — 지점별 `server-*.log` 의 `copy-workers` 를 볼 것)
-- 워커 스레드를 **RPC 마다 새로 생성**한다 (`:244`). 작은 청크 + 큰 W 에서
-  이게 지배하면 처리량이 되레 떨어질 수 있다 → 스레드 풀로 바꾸라는 근거가 된다
-- **`copy_nanos` 는 워커별 시간의 합**이다 (`:284`). 병렬 구간에서 경과시간이
-  아니므로 **처리량 분모로 쓰면 안 된다.** 벤치는 언제나 wall 로 낸다
+- 워커 스레드가 **없다.** RPC 하나의 청크들을 연결 스레드에서 **순서대로**
+  복사하고 마지막에 `fdatasync` 한 번. 그래서 B 를 키워도 병렬도는 늘지 않고,
+  RPC 당 고정 비용(왕복·fdatasync)이 B 개 청크로 나뉘는 효과만 본다
+  (예전에는 `-copy-workers` 개 스레드를 RPC 마다 만들었는데, 그 생성/join 이
+  20~30us 고정 비용이라 2026-11-18 에 제거했다)
+- **`copy_nanos` 는 서버 내부 배치 wall**(복사 + fdatasync)이다. RPC 전송이
+  빠져 있으므로 처리량 분모로는 쓰지 않는다. 벤치는 언제나 클라이언트 wall 로 낸다
 
 클라이언트는 커넥션당 `call_mu` 로 완전 직렬화라 in-flight RPC 가 1개다. 실제
 Raft 경로도 팔로워 핸들러들이 클라이언트 하나를 공유하므로 이 제약은 충실하다.
@@ -58,7 +59,7 @@ Raft 경로도 팔로워 핸들러들이 클라이언트 하나를 공유하므�
 ### ⚠ 백킹 파일은 `dd` 로 준비해야 한다 (`fallocate -z` 로는 안 된다)
 
 `fallocate -l` 만 하면 extent 가 **unwritten** 으로 남는다. 거기 첫 쓰기가 extent
-상태 변환을 파일시스템 저널로 **직렬화**시켜, W 를 올려도 처리량이 안 오르는
+상태 변환을 파일시스템 저널로 **직렬화**시켜, 처리량이 낮게 나오는
 가짜 결과가 나온다. 게다가 한 번 쓴 영역은 효과가 사라지므로 워밍업이 측정
 구간을 덮었는지에 따라 결과가 흔들린다 — 에러 없이 재현이 안 되는 오측이다.
 
@@ -96,7 +97,7 @@ src 측정 구간의 표본이 전부 0 이면 거부한다.
 | **A** | eternitystorage | 로컬 PCIe 위 ext4 파일 | 로컬 PCIe 위 ext4 파일 | 디바이스 |
 | **B** | eternity5 | 같은 SSD 를 RDMA 로 | 같은 SSD 를 RDMA 로 | 링크 (10 Gb/s) |
 
-A 를 대조군으로 둬야 포화 원인이 갈린다 — 같은 W 에서 둘 다 평평하면
+A 를 대조군으로 둬야 포화 원인이 갈린다 — 같은 B·청크에서 둘 다 평평하면
 소프트웨어 탓, B 만 일찍 평평하면 링크 탓이다. **두 arm 이 같은 물리 SSD**
 (node5/node6 의 백킹)를 쓰도록 해서 차이가 순수한 경로 차이가 되게 한다.
 
@@ -156,15 +157,15 @@ arm B 로 갈 때는 `umount` → 3의 `enable` 을 1 로 → eternity5 에서
 
 ### `RAW_CONTROL=1` — 해결책이 아니라 진단
 
-파일 기반에서 **W 스케일링이 안 나올 때만** 쓴다. ext4 가 병렬 O_DIRECT 쓰기를
-제한하는 것인지, blockcopy 구조(RPC 마다 스레드 생성 / 커넥션 직렬화)가
-제한하는 것인지를 가르는 대조군이다. 파일시스템 계층이 없는 raw 블록에
-chunk=1Mi, W∈{1,8} 두 점을 찍는다.
+파일 기반 처리량이 **기대보다 낮을 때만** 쓴다. ext4 가 제한하는 것인지,
+blockcopy 구조(직렬 복사 / 커넥션 직렬화)가 제한하는 것인지를 가르는
+대조군이다. 파일시스템 계층이 없는 raw 블록에 chunk=1Mi, B=16 한 점을 찍어
+같은 점의 파일 기반 결과와 비교한다.
 
-| 파일 W=1→8 | raw W=1→8 | 결론 |
-|---|---|---|
-| 안 오름 | 오름 | **ext4 가 병목** |
-| 안 오름 | 안 오름 | **blockcopy 구조가 병목** ← 진짜 발견 |
+| 파일 vs raw | 결론 |
+|---|---|
+| raw 가 확실히 높음 | **ext4 가 병목** |
+| 비슷하게 낮음 | **blockcopy 구조가 병목** |
 
 대조점은 실험용 dst 가 아니라 별도의 빈 블록 디바이스(`RAW_SRC`/`RAW_DST`,
 기본 `/dev/nvme12n1`→`/dev/nvme13n1`)에 돌린다 — 마운트된 ext4 위에 raw 로 쓰면

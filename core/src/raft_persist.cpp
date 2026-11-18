@@ -411,7 +411,7 @@ int64_t Server::persist_io(const PersistPlan &plan) {
     }
     if (!plan.writes.empty()) {
         auto t_sync = clock_type::now();
-        io.cached_fd->fdatasync();
+        // io.cached_fd->fdatasync();
         nvme_ns += elapsed_ns(t_sync);
     }
     return nvme_ns;

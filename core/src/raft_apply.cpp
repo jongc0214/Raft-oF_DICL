@@ -441,6 +441,8 @@ static ApplyResult apply_internal(Server *s,
     auto t_repl = clock_type::now();
     s->append_entries(sink);   /* shared_ptr 복사가 워커에게 전달된다 */
 
+    s->io.cached_fd->fdatasync();   /* 리더의 로그 flush를 AppendEntries 뒤로 이동 */
+
     int64_t commit_wait_ns = 0;
     {
         auto t_cw = clock_type::now();

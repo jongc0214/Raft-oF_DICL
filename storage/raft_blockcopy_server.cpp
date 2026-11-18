@@ -5,7 +5,6 @@
 #include <cstring>
 #include <stdexcept>
 #include <string>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -14,6 +13,7 @@
 #include <unistd.h>
 #include <time.h>
 
+#include <liburing.h>   // 파일 위쪽
 /**
  *
  */
@@ -49,7 +49,19 @@ int write_pba_copy_buf(int src_fd, int dst_fd,
     }
 
     clock_gettime(CLOCK_MONOTONIC_RAW, &t0);
-    ssize_t w = pwrite(dst_fd, buf, static_cast<size_t>(nbytes), pba_dst);
+    struct Ring { io_uring r; Ring() { io_uring_queue_init(8, &r, 0); } ~Ring() { io_uring_queue_exit(&r); } };
+    static thread_local Ring ring;   // 스레드마다 한 번만 만들고, 스레드 끝날 때 정리
+
+    io_uring_sqe *sqe = io_uring_get_sqe(&ring.r);
+    io_uring_prep_write(sqe, dst_fd, buf, static_cast<unsigned>(nbytes), pba_dst);
+    sqe->rw_flags = RWF_DSYNC;       // 이 쓰기만 영속화 (FUA)
+    io_uring_submit(&ring.r);
+
+    io_uring_cqe *cqe;
+    io_uring_wait_cqe(&ring.r, &cqe);
+    ssize_t w = cqe->res;            // 성공 시 쓴 바이트 수, 실패 시 -errno
+    io_uring_cqe_seen(&ring.r, cqe);
+
     clock_gettime(CLOCK_MONOTONIC_RAW, &t1);
     *write_ns = ns_diff(t0, t1);
     if (w != nbytes) {
@@ -131,9 +143,8 @@ void AlignedBufPool::release(void *p, size_t cap){
     }
 
 BlockCopyServer::BlockCopyServer(std::vector<int> fds, std::vector<std::string> paths,
-                                 int copy_workers, std::vector<int> read_fds)
-        : fds_(std::move(fds)), read_fds_(std::move(read_fds)), paths_(std::move(paths)),
-          copy_workers_(copy_workers < 1 ? 1 : copy_workers) {
+                                 std::vector<int> read_fds)
+        : fds_(std::move(fds)), read_fds_(std::move(read_fds)), paths_(std::move(paths)) {
     read_fds_.resize(fds_.size(), -1);
 }
 
@@ -227,108 +238,53 @@ WritePBABatchRsp BlockCopyServer::handle_write_pba_batch(const WritePBABatchReq 
             return rsp;
         }
 
-        int w = std::min(copy_workers_, static_cast<int>(count));
-        if (w < 1) {
-            w = 1;
-        }
-
-        /* 워커 버퍼는 풀에서 빌린다 (RPC마다 posix_memalign/free를 반복하면
-         * max_size가 256MiB까지 갈 수 있어 -copy-workers 16에서 RPC당 최대
-         * 4GiB를 할당/해제하게 된다). 정상 상태에서는 재사용되어 할당 0. */
-        std::vector<void *> bufs(static_cast<size_t>(w), nullptr);
-        std::vector<size_t> buf_caps(static_cast<size_t>(w), 0);
-        bool alloc_failed = false;
-        for (int i = 0; i < w; i++) {
-            auto got = buf_pool_.acquire(static_cast<size_t>(max_size));
-            if (got.first == nullptr) {
-                alloc_failed = true;
-                break;
-            }
-            bufs[static_cast<size_t>(i)] = got.first;
-            buf_caps[static_cast<size_t>(i)] = got.second;
-        }
-        if (alloc_failed) {
-            for (int i = 0; i < w; i++) {
-                buf_pool_.release(bufs[static_cast<size_t>(i)], buf_caps[static_cast<size_t>(i)]);
-            }
-            rsp.error = "posix_memalign for worker buffer failed";
+        /* 버퍼는 풀에서 하나 빌린다 (RPC마다 posix_memalign/free를 반복하면
+         * max_size가 256MiB까지 갈 수 있다). 정상 상태에서는 재사용되어 할당 0. */
+        auto got = buf_pool_.acquire(static_cast<size_t>(max_size));
+        void *buf = got.first;
+        const size_t buf_cap = got.second;
+        if (buf == nullptr) {
+            rsp.error = "posix_memalign for copy buffer failed";
             return rsp;
         }
 
-        std::mutex stats_mu;
-        std::atomic<bool> has_error{false};
-        std::string first_error;
-        std::mutex err_mu;
         uint64_t total_read_ns = 0, total_write_ns = 0;
 
         struct timespec batch_t0{}, batch_t1{};
         clock_gettime(CLOCK_MONOTONIC_RAW, &batch_t0);
 
-        std::vector<std::thread> workers;
-        workers.reserve(static_cast<size_t>(w));
-        for (int wid = 0; wid < w; wid++) {
-            workers.emplace_back([&, wid]() {
-                uint64_t local_read = 0, local_write = 0;
-                for (size_t i = static_cast<size_t>(wid); i < count; i += static_cast<size_t>(w)) {
-                    uint64_t r = 0, wr = 0;
-                    int rc = write_pba_copy_buf(
-                        src_fd, dst_fd,
-                        static_cast<int64_t>(req.pba_srcs[i]),
-                        static_cast<int64_t>(req.pba_dsts[i]),
-                        static_cast<int>(sizes[i]), bufs[static_cast<size_t>(wid)],
-                        &r, &wr);
-                    if (rc != 0) {
-                        bool expected = false;
-                        if (has_error.compare_exchange_strong(expected, true)) {
-                            std::lock_guard<std::mutex> lk(err_mu);
-                            first_error = "worker " + std::to_string(wid) + " entry " +
-                                std::to_string(i) + " failed";
-                        }
-                        return;
-                    }
-                    local_read += r;
-                    local_write += wr;
-                }
-                std::lock_guard<std::mutex> lk(stats_mu);
-                total_read_ns += local_read;
-                total_write_ns += local_write;
-            });
-        }
-        for (auto &t : workers) {
-            t.join();
-        }
-
-        if (has_error.load()) {
-            for (int i = 0; i < w; i++) {
-                buf_pool_.release(
-                    bufs[static_cast<size_t>(i)],
-                    buf_caps[static_cast<size_t>(i)]);
+        /* 청크를 이 연결 스레드에서 순서대로 복사한다. 청크는 보통 1개이고
+         * 링 wrap / extent 경계에서만 2개가 되므로, 요청마다 워커 스레드를
+         * 만들고 join 하는 비용(20~30us)이 병렬로 얻는 겹침보다 크다. */
+        for (size_t i = 0; i < count; i++) {
+            uint64_t r = 0, wr = 0;
+            int rc = write_pba_copy_buf(
+                src_fd, dst_fd,
+                static_cast<int64_t>(req.pba_srcs[i]),
+                static_cast<int64_t>(req.pba_dsts[i]),
+                static_cast<int>(sizes[i]), buf, &r, &wr);
+            if (rc != 0) {
+                buf_pool_.release(buf, buf_cap);
+                rsp.error = "entry " + std::to_string(i) + " failed";
+                return rsp;
             }
-            rsp.error = first_error;
-            return rsp;
+            total_read_ns += r;
+            total_write_ns += wr;
         }
 
         struct timespec sync_t0{}, sync_t1{};
         clock_gettime(CLOCK_MONOTONIC_RAW, &sync_t0);
-        const int sync_rc = ::fdatasync(dst_fd);
+        // const int sync_rc = ::fdatasync(dst_fd);
         clock_gettime(CLOCK_MONOTONIC_RAW, &sync_t1);
-        if (sync_rc != 0) {
-            for (int i = 0; i < w; i++) {
-                buf_pool_.release(
-                    bufs[static_cast<size_t>(i)],
-                    buf_caps[static_cast<size_t>(i)]);
-            }
-            rsp.error = "fdatasync destination failed";
-            return rsp;
-        }
+        // if (sync_rc != 0) {
+        //     buf_pool_.release(buf, buf_cap);
+        //     rsp.error = "fdatasync destination failed";
+        //     return rsp;
+        // }
 
         clock_gettime(CLOCK_MONOTONIC_RAW, &batch_t1);
 
-        for (int i = 0; i < w; i++) {
-            buf_pool_.release(
-                bufs[static_cast<size_t>(i)],
-                buf_caps[static_cast<size_t>(i)]);
-        }
+        buf_pool_.release(buf, buf_cap);
 
         rsp.read_nanos = static_cast<int64_t>(total_read_ns);
         rsp.write_nanos = static_cast<int64_t>(total_write_ns);

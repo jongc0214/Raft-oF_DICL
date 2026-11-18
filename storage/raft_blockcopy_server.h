@@ -12,7 +12,6 @@
 #include <string>
 #include <vector>
 #include <mutex>
-#include <thread>
 #include <atomic>
 #include <stdexcept>
 #include <algorithm>
@@ -67,11 +66,10 @@ int open_device_for_read(const std::string &path);
  *
  * WritePBABatch 처리에 쓰는 O_DIRECT 정렬 버퍼 풀.
  *
- * 원래는 RPC마다 워커 수만큼 posix_memalign(max_size)를 새로 잡고 끝에
- * free했다. max_size는 MaxPBACopyChunkBytes(256MiB)까지 갈 수 있어서
- * -copy-workers 16이면 RPC 한 번에 최대 4GiB를 할당/해제하게 된다
- * (핫패스에서 page fault + munmap 폭풍). 풀에 넣어 재사용하면 정상
- * 상태에서는 할당이 0이 된다.
+ * RPC 하나가 버퍼 하나(max_size)를 빌린다. 매번 posix_memalign/free를 하면
+ * max_size가 MaxPBACopyChunkBytes(256MiB)까지 갈 수 있어 핫패스에서
+ * page fault + munmap이 생긴다. 풀에 넣어 재사용하면 정상 상태에서는
+ * 할당이 0이 된다. 연결마다 동시에 RPC가 오므로 버퍼는 연결 수만큼 쌓인다.
  *
  * acquire는 요청 크기보다 작은 버퍼를 받으면 키워서 돌려주므로,
  * 호출자는 항상 n바이트 이상을 보장받는다. 동시 RPC를 막지 않는다
@@ -102,11 +100,10 @@ struct WritePBABatchReq {
     uint64_t block_size = 0;
     int src_dev = 0, dst_dev = 0;
 };
-/* copy_nanos 는 배치 wall 이다: 워커 생성 -> pread/pwrite -> join -> fdatasync.
- * read_nanos / write_nanos 는 워커별 pread / pwrite 시간의 합, sync_nanos 는
- * 마지막 fdatasync(dst) 하나의 시간이다. 워커가 하나면
- *   copy_nanos - (read + write + sync) = 워커 생성/join + 버퍼 풀 등 서버 내부 오버헤드.
- * 워커가 여럿이면 read/write 는 겹친 시간의 합이라 copy_nanos 보다 클 수 있다.
+/* copy_nanos 는 배치 wall 이다: 청크별 pread/pwrite 를 순서대로 -> fdatasync.
+ * read_nanos / write_nanos 는 청크별 pread / pwrite 시간의 합, sync_nanos 는
+ * 마지막 fdatasync(dst) 하나의 시간이다. 복사는 호출(연결) 스레드에서 직렬로
+ * 하므로 copy_nanos - (read + write + sync) = 타이머 등 소량의 기타.
  * 방향별로 나누는 이유: 로컬 PCIe 복사와 NVMe-oF attach 볼륨 복사의 지연 차이가
  * pread 쪽인지 pwrite 쪽인지는 합계만으로는 알 수 없다 (blkcopy 벤치가 묻는 질문). */
 struct WritePBABatchRsp {
@@ -127,7 +124,7 @@ class BlockCopyServer {
 public:
     /* fds: 장치별 쓰기 fd (dst). read_fds: 장치별 src 읽기 fd -- 비었거나 항목이
      * -1이면 그 장치는 쓰기 fd로 읽는다. 두 벡터의 fd 모두 서버가 소유하고 닫는다. */
-    BlockCopyServer(std::vector<int> fds, std::vector<std::string> paths, int copy_workers,
+    BlockCopyServer(std::vector<int> fds, std::vector<std::string> paths,
                     std::vector<int> read_fds = {});
 
     ~BlockCopyServer();
@@ -147,9 +144,8 @@ private:
     std::vector<int> fds_;
     std::vector<int> read_fds_;   /* fds_와 같은 길이, -1 = fds_ 사용 */
     std::vector<std::string> paths_;
-    int copy_workers_;
 
-    AlignedBufPool buf_pool_;   /* WritePBABatch 워커 버퍼 재사용 풀 */
+    AlignedBufPool buf_pool_;   /* WritePBABatch 복사 버퍼 재사용 풀 */
 
     std::mutex mu_;
     uint64_t read_ns_ = 0, write_ns_ = 0, other_ns_ = 0;

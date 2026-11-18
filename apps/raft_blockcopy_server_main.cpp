@@ -17,7 +17,7 @@
  *
  * 사용법 (원본과 동일한 플래그):
  *   raft_blockcopy_server -addr 0.0.0.0:5050 \
- *       -devices /dev/nvme0n1,/dev/nvme1n1 -copy-workers 8
+ *       -devices /dev/nvme0n1,/dev/nvme1n1
  */
 #include "raft_blockcopy_server.h"
 #include "raft_blockcopy_tcp_server.h"
@@ -32,7 +32,6 @@
 #include <sys/stat.h>
 #include <vector>
 #include <sstream>
-#include <thread>
 
 using namespace nvmeof_raft::cli;
 
@@ -40,15 +39,13 @@ namespace {
 
 void usage(const char *prog) {
     std::fprintf(stderr,
-        "usage: %s [-addr host:port] [-devices dev1,dev2,...] [-copy-workers N]\n"
+        "usage: %s [-addr host:port] [-devices dev1,dev2,...]\n"
         "             [-transport rdma|tcp]\n"
         "  -addr         listen address (default 0.0.0.0:5050)\n"
         "  -transport    rdma (default) | tcp\n"
         "  -devices      comma-separated NVMe device paths, one per cluster\n"
         "                member index (default /dev/nvme0n1). A regular file\n"
-        "                (nvmet file-backed namespace) is read buffered\n"
-        "  -copy-workers parallel workers per WritePBABatch (default: nproc,\n"
-        "                capped at 16)\n",
+        "                (nvmet file-backed namespace) is read buffered\n",
         prog);
 }
 
@@ -58,11 +55,6 @@ int main(int argc, char **argv) {
     std::string addr = "0.0.0.0:5050";
     std::string transport = "rdma";
     std::string devices_str = "/dev/nvme0n1";
-    unsigned hw = std::thread::hardware_concurrency();
-    int copy_workers = static_cast<int>(hw == 0 ? 4 : hw);
-    if (copy_workers > 16) {
-        copy_workers = 16;   /* "so a 64-core box doesn't allocate W*BlockSize per RPC" */
-    }
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -72,8 +64,6 @@ int main(int argc, char **argv) {
             transport = next_arg_value(argc, argv, i, "-transport");
         } else if (arg == "-devices") {
             devices_str = next_arg_value(argc, argv, i, "-devices");
-        } else if (arg == "-copy-workers") {
-            copy_workers = std::atoi(next_arg_value(argc, argv, i, "-copy-workers").c_str());
         } else if (arg == "-h" || arg == "--help") {
             usage(argv[0]);
             return 0;
@@ -115,12 +105,7 @@ int main(int argc, char **argv) {
                     is_file ? "buffered" : "direct");
     }
 
-    if (copy_workers < 1) {
-        copy_workers = 1;
-    }
-    std::printf("  copy-workers : %d (per WritePBABatch)\n", copy_workers);
-
-    nvmeof_raft::blockcopy::BlockCopyServer server(fds, devices, copy_workers, read_fds);
+    nvmeof_raft::blockcopy::BlockCopyServer server(fds, devices, read_fds);
 
     nvmeof_raft::TransportKind transport_kind = nvmeof_raft::TransportKind::Rdma;
     if (!nvmeof_raft::parse_transport_kind(transport, &transport_kind)) {

@@ -132,7 +132,6 @@ fi
 sudo stdbuf -oL -eL "$BC_BIN" \
     -addr 0.0.0.0:5050 \
     -devices "$BC_DEVICES" \
-    -copy-workers 8 \
     -transport "$BIN_TRANSPORT" \
     > "$RUN_LOG" 2>&1 &
 

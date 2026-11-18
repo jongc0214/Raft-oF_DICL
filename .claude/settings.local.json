@@ -3,7 +3,8 @@
     "allow": [
       "Bash(./build.sh regen-proto *)",
       "Bash(timeout 900 ctest --output-on-failure)",
-      "Bash(protoc --cpp_out=proto -I proto proto/rpcproto.proto)"
+      "Bash(protoc --cpp_out=proto -I proto proto/rpcproto.proto)",
+      "Bash(python3 -)"
     ]
   }
 }

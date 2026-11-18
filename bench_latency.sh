@@ -130,7 +130,6 @@ echo                                                    | tee -a "$OUT"
 echo "ring_pages      : $RING_PAGES"                   | tee -a "$OUT"
 echo "heartbeat_ms    : $HEARTBEAT_MS"                 | tee -a "$OUT"
 echo "ae_batch        : $AE_BATCH"                     | tee -a "$OUT"
-echo "copy_workers    : $COPY_WORKERS"                 | tee -a "$OUT"
 
 echo                                                    | tee -a "$OUT"
 
