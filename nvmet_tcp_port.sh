@@ -27,17 +27,30 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NET="${NET:-eth}"
+
 case "$NET" in
-    eth)   PORT_ID=11; TRADDR=115.145.173.243 ;;
-    ipoib) PORT_ID=12; TRADDR=10.0.0.91 ;;
-    *) echo "ERROR: NET 은 eth|ipoib: $NET" >&2; exit 2 ;;
+    eth)
+        PORT_ID="${PORT_ID:-11}"
+        TRADDR="${TRADDR:-115.145.173.243}"
+        ;;
+    ipoib)
+        PORT_ID="${PORT_ID:-12}"
+        TRADDR="${TRADDR:-10.0.0.91}"
+        ;;
+    *)
+        echo "ERROR: NET 은 eth|ipoib: $NET" >&2
+        exit 2
+        ;;
 esac
+
 TRSVCID="${TRSVCID:-4421}"
 CFG=/sys/kernel/config/nvmet
 PORT_DIR="$CFG/ports/$PORT_ID"
+
 STATE_DIR="/var/lib/raftof-nvmet-tcp"
 STATE="$STATE_DIR/$NET"
-HOST_ONLY="eternitystorage"
+
+HOST_ONLY="${HOST_ONLY:-eternitystorage}"
 if [[ "$NET" == eth ]]; then FIREWALL="${FIREWALL:-1}"; else FIREWALL="${FIREWALL:-0}"; fi
 FW_TAG="raftof-nvmet-tcp"
 

@@ -34,6 +34,11 @@ POOL=(
     "8|10.0.0.8:6000|115.145.173.127:6000|node8|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509502"     # 빌린 노드
     "9|10.0.0.9:6000|115.145.173.128:6000|node9|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509486"     # 빌린 노드
     "10|10.0.0.10:6000|115.145.173.129:6000|node10|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509503"  # 빌린 노드
+
+    #EC2 Nodes
+    "11|DOWN|172.31.43.202|node11|/dev/nvme3n1"
+    "12|DOWN|172.31.43.202|node12|/dev/nvme2n1"
+    "13|DOWN|172.31.43.202|node13|/dev/nvme1n1"
 )
 # 7~10 (eternity7~10) 은 다른 사람 노드를 잠시 빌린 것이다. 그 호스트의 NVMe-oF·ARP·
 #   C-state 설정은 borrow_node.sh up/down 으로만 바꾸고 되돌린다 (2026-11-05).
@@ -72,6 +77,8 @@ TOPO_5_NODES="${TOPO_5_NODES:-2 3 4 5 6}"
 TOPO_6_NODES="${TOPO_6_NODES:-1 2 3 4 5 6}"
 TOPO_7_NODES="${TOPO_7_NODES:-2 3 4 5 6 7 8}"
 TOPO_9_NODES="${TOPO_9_NODES:-2 3 4 5 6 7 8 9 10}"
+EC2_S1_C3="${EC2_S1_C3:-11 12 13}"
+
 if [[ -z "${NODES:-}" ]]; then
     case "${TOPO:-3}" in
         3) NODES="$TOPO_3_NODES" ;;
@@ -80,6 +87,7 @@ if [[ -z "${NODES:-}" ]]; then
         6) NODES="$TOPO_6_NODES" ;;
         7) NODES="$TOPO_7_NODES" ;;
         9) NODES="$TOPO_9_NODES" ;;
+        EC2_S1_C3) NODES="$EC2_S1_C3" ;;
         *) echo "invalid TOPO: ${TOPO} (3|4|5|6|7|9)" >&2; return 1 2>/dev/null || exit 1 ;;
     esac
 fi
