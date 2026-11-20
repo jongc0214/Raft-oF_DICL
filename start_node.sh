@@ -117,7 +117,7 @@ if ldd "$NODE_BIN" 2>/dev/null | grep -q 'not found'; then
     fi
     LIB_PREFIX=(env "LD_LIBRARY_PATH=$LIB_DIR")
 fi
-if [[ "${NUMA_BIND:-1}" == "1" ]]; then
+if [[ "${NUMA_BIND:-0}" == "1" ]]; then
     IB_IF="$(ib_iface)" || { echo "ERROR: IB 인터페이스를 찾지 못했다 (NUMA_BIND=0 으로 끌 수 있다)"; exit 1; }
     IB_NUMA="$(ib_numa_node)"
     if [[ "$IB_NUMA" =~ ^[0-9]+$ ]]; then
@@ -176,7 +176,7 @@ ioq_cpus() {
 #   CPUS(physcpubind) 에는 적용하지 않는다.
 IO_SAME_NODE="${IO_SAME_NODE:-1}"
 SAME_NODE_CPUS=""
-if [[ "$IO_SAME_NODE" == "1" && "${NUMA_BIND:-1}" == "1" && -z "${CPUS:-}" \
+if [[ "$IO_SAME_NODE" == "1" && "${NUMA_BIND:-0}" == "1" && -z "${CPUS:-}" \
       && "${IB_NUMA:-}" =~ ^[0-9]+$ && -r "/sys/devices/system/node/node$IB_NUMA/cpulist" ]]; then
     for r in $(tr ',' ' ' < "/sys/devices/system/node/node$IB_NUMA/cpulist"); do
         if [[ "$r" == *-* ]]; then

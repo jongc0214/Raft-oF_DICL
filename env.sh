@@ -20,6 +20,9 @@ export RAFT_ROOT="$SCRIPT_DIR"
 #    -devices 인덱스를 정한다 (순서가 다르면 엉뚱한 볼륨에 쓴다).
 #
 POOL=(
+    "11|DOWN|172.31.43.202:6000|node11|/dev/disk/by-id/nvme-Amazon_EC2_NVMe_Instance_Storage_AWS1D5E543BD37FC39A9"   # ec2_quick
+    "12|DOWN|10.0.1.12:6000|node12|/dev/disk/by-id/nvme-Amazon_EC2_NVMe_Instance_Storage_AWS221526CA8B5D3DCFB"   # ec2_quick
+    "13|DOWN|10.0.1.13:6000|node13|/dev/disk/by-id/nvme-Amazon_EC2_NVMe_Instance_Storage_AWS439B4728753A7D167"   # ec2_quick
     "1|10.0.0.1:6000|115.145.173.242:6000|node1|/dev/disk/by-id/nvme-SAMSUNG_MZQL2960HCJR-00A07_S64FNE0R906876"   # PM9A3 (나머지와 모델이 다름)
     "2|10.0.0.2:6000|115.145.173.244:6000|node2|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509498"
     "3|10.0.0.3:6000|115.145.173.245:6000|node3|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509501"
@@ -34,6 +37,8 @@ POOL=(
     "8|10.0.0.8:6000|115.145.173.127:6000|node8|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509502"     # 빌린 노드
     "9|10.0.0.9:6000|115.145.173.128:6000|node9|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509486"     # 빌린 노드
     "10|10.0.0.10:6000|115.145.173.129:6000|node10|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509503"  # 빌린 노드
+
+    #EC2 Nodes
 )
 # 7~10 (eternity7~10) 은 다른 사람 노드를 잠시 빌린 것이다. 그 호스트의 NVMe-oF·ARP·
 #   C-state 설정은 borrow_node.sh up/down 으로만 바꾸고 되돌린다 (2026-11-05).
@@ -72,6 +77,8 @@ TOPO_5_NODES="${TOPO_5_NODES:-2 3 4 5 6}"
 TOPO_6_NODES="${TOPO_6_NODES:-1 2 3 4 5 6}"
 TOPO_7_NODES="${TOPO_7_NODES:-2 3 4 5 6 7 8}"
 TOPO_9_NODES="${TOPO_9_NODES:-2 3 4 5 6 7 8 9 10}"
+EC2_S1_C3="${EC2_S1_C3:-11 12 13}"
+
 if [[ -z "${NODES:-}" ]]; then
     case "${TOPO:-3}" in
         3) NODES="$TOPO_3_NODES" ;;
@@ -80,6 +87,7 @@ if [[ -z "${NODES:-}" ]]; then
         6) NODES="$TOPO_6_NODES" ;;
         7) NODES="$TOPO_7_NODES" ;;
         9) NODES="$TOPO_9_NODES" ;;
+        EC2_S1_C3) NODES="$EC2_S1_C3" ;;
         *) echo "invalid TOPO: ${TOPO} (3|4|5|6|7|9)" >&2; return 1 2>/dev/null || exit 1 ;;
     esac
 fi
@@ -172,7 +180,7 @@ build_cluster() {
     local kind="$1" col id addr dev nqn sh
     case "$kind" in
         ipoib) col=1; sh="10.0.0.91:5050" ;;
-        eth)   col=2; sh="115.145.173.243:5050" ;;
+        eth)   col=2; sh="172.31.33.130:5050" ;;
         *) echo "build_cluster: kind must be ipoib|eth" >&2; return 1 ;;
     esac
     CLUSTER=""; ADDRS=""
@@ -226,7 +234,7 @@ record_io_pin() {
 net_prefix() {
     case "$1" in
         ipoib) echo "10.0.0." ;;
-        eth)   echo "115.145.173." ;;
+        eth)   echo "172.31." ;;
         *) echo "net_prefix: ipoib|eth" >&2; return 1 ;;
     esac
 }
@@ -569,3 +577,6 @@ select_transport_env() {
             ;;
     esac
 }
+
+# AWS EC2 topology override
+source "$SCRIPT_DIR/aws_ec2.sh"
