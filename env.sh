@@ -39,6 +39,9 @@ POOL=(
     "10|10.0.0.10:6000|115.145.173.129:6000|node10|/dev/disk/by-id/nvme-SAMSUNG_MZQLB960HAJR-00007_S437NA0N509503"  # 빌린 노드
 
     #EC2 Nodes
+    "11|DOWN|172.31.43.202|node11|/dev/nvme3n1"
+    "12|DOWN|172.31.43.202|node12|/dev/nvme2n1"
+    "13|DOWN|172.31.43.202|node13|/dev/nvme1n1"
 )
 # 7~10 (eternity7~10) 은 다른 사람 노드를 잠시 빌린 것이다. 그 호스트의 NVMe-oF·ARP·
 #   C-state 설정은 borrow_node.sh up/down 으로만 바꾸고 되돌린다 (2026-11-05).
