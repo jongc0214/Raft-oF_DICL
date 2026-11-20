@@ -2,10 +2,9 @@
 set -euo pipefail
 
 PAYLOAD="${1:-4096}"
-VER="${2:-old}"
-TRANSPORT_MODE="${3:-rdma}"
-WARMUP="${4:-1000}"
-COUNT="${5:-10000}"
+TRANSPORT_MODE="${2:-rdma}"
+WARMUP="${3:-1000}"
+COUNT="${4:-10000}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/env.sh"
