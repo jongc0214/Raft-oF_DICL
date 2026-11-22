@@ -18,7 +18,7 @@ fi
 
 ID="$1"
 MODE="${2:-destination}"
-TRANSPORT_MODE="${3:-rdma}"
+TRANSPORT_MODE="${3:-tcp}"
 
 is_valid_id "$ID" || {
     echo "invalid node id: $ID"
