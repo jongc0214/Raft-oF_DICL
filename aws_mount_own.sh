@@ -28,11 +28,29 @@ dev="$(device_for_id "$id")"
 
 fs="$(blkid -s TYPE -o value "$dev" 2>/dev/null || true)"
 
-[[ "$fs" == ext4 ]] || {
-    echo "ERROR: $dev has filesystem '$fs', expected ext4" >&2
-    echo "No automatic formatting is performed." >&2
+if [[ "$fs" == "ext4" ]]; then
+    echo "Existing ext4 filesystem: $dev"
+
+elif [[ -z "$fs" ]]; then
+    # blkid가 비어 있다는 것만으로 빈 디스크라고 단정하지 않는다.
+    # 기존 파일시스템/RAID 등의 시그니처가 있으면 중단한다.
+    if [[ -n "$(wipefs -n --noheadings "$dev")" ]]; then
+        echo "ERROR: existing disk signature detected: $dev" >&2
+        exit 1
+    fi
+
+    [[ "$(lsblk -dn -o TYPE "$dev")" == "disk" ]] || {
+        echo "ERROR: unexpected device type: $dev" >&2
+        exit 1
+    }
+
+    echo "Creating ext4 filesystem on $dev (node$id)"
+    mkfs.ext4 "$dev"
+
+else
+    echo "ERROR: unexpected filesystem '$fs' on $dev" >&2
     exit 1
-}
+fi
 
 mkdir -p /mnt/raftvol
 
