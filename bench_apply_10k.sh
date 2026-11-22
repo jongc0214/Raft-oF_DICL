@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PAYLOAD="${1:-4096}"
-TRANSPORT_MODE="${2:-rdma}"
+TRANSPORT_MODE="${2:-tcp}"
 WARMUP="${3:-1000}"
 COUNT="${4:-10000}"
 

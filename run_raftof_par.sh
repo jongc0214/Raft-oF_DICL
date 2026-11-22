@@ -4,7 +4,7 @@ BATCH="${BATCH:-1}"
 N="${1:?usage: $0 N [payload] [count] [tcp|tcp-ib|rdma]}"
 PAYLOAD="${2:-4096}"
 COUNT="${3:-10000}"                         # 프로세스당 측정 명령 수
-TRANSPORT_MODE="${4:-rdma}"
+TRANSPORT_MODE="${4:-tcp}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/env.sh"
 cd "$RAFT_ROOT"
