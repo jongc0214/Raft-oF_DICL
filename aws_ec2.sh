@@ -43,32 +43,42 @@ aws_local_device_for_id() {
     local owner="${slot%%:*}"
     local letter="${slot##*:}"
     local owner_ip="${STORAGE_IP[$owner]:-}"
-    local dev
+    local path real model
+    local -a disks=()
+    local index
 
-    # 다른 서버에서는 기존 토폴로지 설정 사용
+    [[ -n "$slot" ]] || return 1
+
+    # Storage 소유자가 아닌 서버에서는 로컬 SSD를 탐색하지 않음.
+    # Raft Compute는 NQN으로 볼륨을 찾고,
+    # 다른 Storage는 원격 NVMe/TCP 장치로 접근함.
     if [[ " $(hostname -I) " != *" $owner_ip "* ]]; then
-        echo "${STORAGE_DISK[$slot]:-}"
-        return
+        echo "${STORAGE_DISK[$slot]:-AUTO}"
+        return 0
     fi
 
-    # 현재 Storage EC2의 실제 Instance Store SSD 탐색
-    local -a disks=()
-    local path model
-
+    # 현재 Storage EC2의 Instance Store SSD 탐색.
+    # 중복 by-id alias(_1)는 제외한다.
     for path in /dev/disk/by-id/nvme-Amazon_EC2_NVMe_Instance_Storage_AWS*; do
         [[ -b "$path" ]] || continue
         [[ "$path" != *_1 ]] || continue
 
-        model="$(lsblk -dn -o MODEL "$(readlink -f "$path")" | xargs)"
-        [[ "$model" == *"Instance Storage"* ]] || continue
+        real="$(readlink -f "$path")"
+        model="$(lsblk -dn -o MODEL "$real" | xargs)"
 
+        [[ "$model" == *"Instance Storage"* ]] || continue
         disks+=("$path")
     done
 
-    # 시리얼 기준 정렬
-    mapfile -t disks < <(printf '%s\n' "${disks[@]}" | sort -u)
+    ((${#disks[@]} >= 3)) || {
+        echo "ERROR: found ${#disks[@]} Instance Store SSDs, expected at least 3" >&2
+        return 1
+    }
 
-    local index
+    mapfile -t disks < <(
+        printf '%s\n' "${disks[@]}" | sort -u
+    )
+
     case "$letter" in
         A) index=0 ;;
         B) index=1 ;;
@@ -76,12 +86,10 @@ aws_local_device_for_id() {
         *) return 1 ;;
     esac
 
-    [[ -n "${disks[$index]:-}" ]] || {
-        echo "ERROR: Storage SSD $letter not found" >&2
-        return 1
-    }
+    path="${disks[$index]:-}"
+    [[ -n "$path" && -b "$path" ]] || return 1
 
-    echo "${disks[$index]}"
+    echo "$path"
 }
 
 aws_validate_topology() {
@@ -134,7 +142,7 @@ aws_validate_topology() {
 
         dev="${STORAGE_DISK[$slot]:-}"
 
-        [[ "$dev" == /dev/disk/by-id/* ]] || {
+        [[ "$dev" == "AUTO" || "$dev" == /dev/disk/by-id/* ]] || {
             aws_die "STORAGE_DISK[$slot] must use /dev/disk/by-id/"
             return 1
         }
