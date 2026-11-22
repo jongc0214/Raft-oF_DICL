@@ -40,7 +40,48 @@ aws_storage_ip_for_id() {
 
 aws_local_device_for_id() {
     local slot="${VOLUME_DISK[$1]:-}"
-    echo "${STORAGE_DISK[$slot]:-}"
+    local owner="${slot%%:*}"
+    local letter="${slot##*:}"
+    local owner_ip="${STORAGE_IP[$owner]:-}"
+    local dev
+
+    # 다른 서버에서는 기존 토폴로지 설정 사용
+    if [[ " $(hostname -I) " != *" $owner_ip "* ]]; then
+        echo "${STORAGE_DISK[$slot]:-}"
+        return
+    fi
+
+    # 현재 Storage EC2의 실제 Instance Store SSD 탐색
+    local -a disks=()
+    local path model
+
+    for path in /dev/disk/by-id/nvme-Amazon_EC2_NVMe_Instance_Storage_AWS*; do
+        [[ -b "$path" ]] || continue
+        [[ "$path" != *_1 ]] || continue
+
+        model="$(lsblk -dn -o MODEL "$(readlink -f "$path")" | xargs)"
+        [[ "$model" == *"Instance Storage"* ]] || continue
+
+        disks+=("$path")
+    done
+
+    # 시리얼 기준 정렬
+    mapfile -t disks < <(printf '%s\n' "${disks[@]}" | sort -u)
+
+    local index
+    case "$letter" in
+        A) index=0 ;;
+        B) index=1 ;;
+        C) index=2 ;;
+        *) return 1 ;;
+    esac
+
+    [[ -n "${disks[$index]:-}" ]] || {
+        echo "ERROR: Storage SSD $letter not found" >&2
+        return 1
+    }
+
+    echo "${disks[$index]}"
 }
 
 aws_validate_topology() {
