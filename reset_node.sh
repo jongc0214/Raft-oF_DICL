@@ -6,7 +6,7 @@ source "$SCRIPT_DIR/env.sh"
 
 ID="${1:-}"
 MODE="${2:-destination}"
-TRANSPORT_MODE="${3:-rdma}"
+TRANSPORT_MODE="${3:-tcp}"
 
 if ! is_valid_id "$ID"; then
     echo "usage: $0 <$(valid_ids_str | tr -d ' ' | tr ',' '|')> [destination|leader|push] [tcp|tcp-ib|rdma]" >&2
