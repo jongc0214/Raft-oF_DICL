@@ -590,6 +590,20 @@ void Server::append_entries_loop(int fi, AppendEntriesWorkerState *w) {
  * cmd_len은 실제로 실은 명령 길이다. 호출자가 mu를 보유한다. */
 std::vector<EntryMeta> Server::build_entry_metas_locked(uint64_t next, uint64_t len,
                                                         bool with_payload) {
+    // Diagnostic only: time the existing synchronous readback under s.mu.
+    auto timed_readback = [this](uint64_t idx, uint64_t slot, const char *source) {
+        const auto begin = std::chrono::steady_clock::now();
+        auto result = read_entry_direct(slot);
+        const auto end = std::chrono::steady_clock::now();
+        const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count();
+        if (ns >= 1000000) {
+            std::fprintf(stderr,
+                "[NORMAL-READBACK-SLOW] ts_ns=%lld index=%llu slot=%llu source=%s read_us=%.3f\n",
+                (long long)std::chrono::duration_cast<std::chrono::nanoseconds>(end.time_since_epoch()).count(),
+                (unsigned long long)idx, (unsigned long long)slot, source, ns / 1000.0);
+        }
+        return result;
+    };
     std::vector<EntryMeta> metas(len);
     for (uint64_t k = 0; k < len; k++) {
         const uint64_t idx = next + k;
@@ -607,14 +621,14 @@ std::vector<EntryMeta> Server::build_entry_metas_locked(uint64_t next, uint64_t 
         if (!e.command.empty()) {
             m.command = e.command;   /* 버퍼 공유 (참조 카운트만, 바이트 복사 없음 -- CommandBytes) */
         } else if (e.ring_slot != 0) {
-            m.command = read_entry_direct(e.ring_slot).entry.command;
+            m.command = timed_readback(idx, e.ring_slot, "entry_slot").entry.command;
         } else if (e.cmd_len > 0) {
             auto it = ring.log_slot_map.find(idx);
             if (it == ring.log_slot_map.end()) {
                 throw std::runtime_error("build_entry_metas_locked: no slot for applied entry " +
                                          std::to_string(idx));
             }
-            m.command = read_entry_direct(it->second.start).entry.command;
+            m.command = timed_readback(idx, it->second.start, "applied_slot_map").entry.command;
         }
         m.cmd_len = m.command.size();
     }
