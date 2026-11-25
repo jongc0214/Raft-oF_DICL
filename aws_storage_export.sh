@@ -1,3 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"
+source ./env.sh
+
+ACTION="${1:-}"
+[[ "$ACTION" == up || "$ACTION" == status || "$ACTION" == down ]] || {
+    echo 'usage: sudo ./aws_storage_export.sh up|status|down' >&2; exit 2;
+}
+(( EUID == 0 )) || { echo 'ERROR: root required' >&2; exit 1; }
+
+self_ips=" $(hostname -I) "
+my_storage=""
+for s in s1 s2 s3; do
+    ip="${STORAGE_IP[$s]:-}"
+    if [[ -n "$ip" && "$ip" != CHANGE_ME && "$self_ips" == *" $ip "* ]]; then
+        my_storage="$s"; break
+    fi
+done
+[[ -n "$my_storage" ]] || { echo 'ERROR: not a configured Storage host' >&2; exit 1; }
+
+modprobe nvmet
+modprobe nvmet-tcp
+mountpoint -q /sys/kernel/config || mount -t configfs configfs /sys/kernel/config
+base=/sys/kernel/config/nvmet
+port="$base/ports/1"
+
+# Only run 'down' after *all* initiators have disconnected and BlockCopy stopped.
+# Dedicated Raft-oF Storage servers only. Never deletes data or filesystems.
+if [[ "$ACTION" == down ]]; then
+    if pgrep -f '[/]raft_blockcopy_server' >/dev/null; then
+        echo 'ERROR: BlockCopy server still running' >&2; exit 1
     fi
     # Refuse to change any exported namespace while a controller is connected.
     for ss in "$base"/subsystems/node{11..19}; do
