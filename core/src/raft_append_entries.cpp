@@ -74,7 +74,9 @@ void Server::trigger_ae_worker(int fi, std::shared_ptr<ReplSink> sink, bool hear
 void Server::append_entries_worker(int fi, [[maybe_unused]] ReplSink *sink, bool heartbeat_due) {
     {
         /* ---- 4-1. waitLockB ---- */
+        const auto diag_lock_begin = clock_type::now();
         mu.lock();
+        const auto diag_lock_acquired = clock_type::now();
 
         /* ---- 4-2. logValid ---- */
         uint64_t next = raft.cluster[static_cast<size_t>(fi)].next_index;
@@ -271,10 +273,13 @@ void Server::append_entries_worker(int fi, [[maybe_unused]] ReplSink *sink, bool
          *  in-memory log without readback. Command payload is on the
          *  device via PBA copy; follower loads it lazily at apply time." */
         const bool normal_mode = (replication_mode == ReplicationMode::Normal);
+        int64_t diag_meta_ns = 0;
         std::vector<EntryMeta> metas;
         if (len_entries > 0) {
             try {
+                const auto diag_meta = clock_type::now();
                 metas = build_entry_metas_locked(next, len_entries, normal_mode);
+                diag_meta_ns = elapsed_ns(diag_meta);
             } catch (const std::exception &) {
                 /* 정상경로에서 자기 링 읽기(read_entry_direct)가 실패했다. Leader-Side
                  * 복사 실패와 같은 fail-soft: 이번 회차는 버리고 다음 라운드에 재시도.
@@ -336,6 +341,15 @@ void Server::append_entries_worker(int fi, [[maybe_unused]] ReplSink *sink, bool
         }
 
         mu.unlock();   /* "lockB Finish" */
+        const auto diag_end = clock_type::now();
+        const auto diag_hold_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(diag_end - diag_lock_acquired).count();
+        const auto diag_wait_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(diag_lock_acquired - diag_lock_begin).count();
+        if (normal_mode && (diag_hold_ns >= 1000000 || diag_wait_ns >= 1000000)) {
+            std::fprintf(stderr, "[NORMAL-SLOW] ae ts_ns=%lld follower=%d next=%llu entries=%llu lock_wait_us=%.3f lock_hold_us=%.3f meta_us=%.3f\n",
+                (long long)std::chrono::duration_cast<std::chrono::nanoseconds>(diag_end.time_since_epoch()).count(),
+                fi, (unsigned long long)sent_next, (unsigned long long)len_entries,
+                diag_wait_ns/1000.0, diag_hold_ns/1000.0, diag_meta_ns/1000.0);
+        }
 
         /* ---- Leader-Side replication (Server::ReplicationMode::LeaderSide,
          *  hpdc15dare 3.1.2와 동일 정책) ----

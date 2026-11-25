@@ -80,6 +80,7 @@ struct GcReq {
 
     std::string error;
     
+    int64_t prepare_ns = 0, io_wall_ns = 0, relock_ns = 0, ring_wait_ns = 0, header_ns = 0;
     int64_t nvme_ns = 0;      // 대표가 채움 (묶음 전체의 persist 시간)
 };
 
@@ -117,6 +118,7 @@ static void commit_batch_locked(Server *s, std::unique_lock<std::mutex> &lk,
 
     const auto &cmds0 = *batch[0]->commands;
     if (!s->can_write_all(cmds0)) {
+        const auto diag_ring = clock_type::now();
         bool ok  = s->ring_not_full.wait_for(
             lk, std::chrono::milliseconds(kRingWaitMs),
             [&]() { return s->done.load() || 
@@ -125,6 +127,7 @@ static void commit_batch_locked(Server *s, std::unique_lock<std::mutex> &lk,
             }
         );
 
+        batch[0]->ring_wait_ns = elapsed_ns(diag_ring);
         if (!ok || s->done.load()) { 
             fail("ring buffer full", true);
             return;
@@ -215,19 +218,25 @@ static void commit_batch_locked(Server *s, std::unique_lock<std::mutex> &lk,
         Server::PersistPlan plan;
         s->persist_inflight = true;
         s->ring.durable_floor = saved_tail_log_index - 1;
+        const auto diag_prepare = clock_type::now();
         try {
             plan = s->persist_prepare_locked(static_cast<int>(total_n), sink);
         } catch (const std::exception &e) {
             io_err = e.what();
         }
+        batch[0]->prepare_ns = elapsed_ns(diag_prepare);
         if (io_err.empty()) {
             lk.unlock();
+            const auto diag_io = clock_type::now();
             try {
                 nvme_ns = s->persist_io(plan);
             } catch (const std::exception &e) {
                 io_err = e.what();
             }
+            batch[0]->io_wall_ns = elapsed_ns(diag_io);
+            const auto diag_relock = clock_type::now();
             lk.lock();
+            batch[0]->relock_ns = elapsed_ns(diag_relock);
         }
         s->persist_inflight = false;
         s->persist_cv.notify_all();
@@ -238,6 +247,7 @@ static void commit_batch_locked(Server *s, std::unique_lock<std::mutex> &lk,
         }
     } else {
         /* 헤더 쓰기가 필요한 호출(term/vote 변경 후 첫 묶음 등)은 기존처럼 mu 안에서 동기 처리한다 */
+        const auto diag_header = clock_type::now();
         try {
             nvme_ns = s->persist_circular(true, static_cast<int>(total_n), sink);
         } catch (const std::exception &e) {
@@ -245,6 +255,7 @@ static void commit_batch_locked(Server *s, std::unique_lock<std::mutex> &lk,
             fail(std::string("persist failed: ") + e.what(), false);
             return;
         }
+        batch[0]->header_ns = elapsed_ns(diag_header);
     }
 
     for (GcReq *r : batch) { 
@@ -346,8 +357,20 @@ static ApplyResult apply_internal(Server *s,
 
     /* ---- Lock A ---- */
     // [Group Commit]
+    int64_t diag_queue_ns = 0, diag_lock_ns = 0, diag_batch_ns = 0, diag_publish_ns = 0;
+    size_t diag_batch_size = 0;
+    uint64_t diag_index = 0;
+    bool diag_normal = false;
     if (is_rep) {
+        const auto diag_lock = clock_type::now();
+#if RAFT_TIMING
+        diag_queue_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(diag_lock - t_enter).count();
+#endif
         std::unique_lock<std::mutex> lk(s->mu);
+        diag_lock_ns = elapsed_ns(diag_lock);
+        const auto diag_batch = clock_type::now();
+        diag_normal = s->replication_mode == Server::ReplicationMode::Normal;
+        diag_index = s->ring.tail_log_index;
 
         std::vector<GcReq *> batch;
         batch.push_back(&req);
@@ -396,8 +419,12 @@ static ApplyResult apply_internal(Server *s,
         }
 #endif
 
+        diag_batch_size = batch.size();
         lk.unlock();
+        diag_batch_ns = elapsed_ns(diag_batch);
+        const auto diag_publish = clock_type::now();
         gc_publish(s, batch, &req);
+        diag_publish_ns = elapsed_ns(diag_publish);
     }
 
     if (!req.error.empty()) {
@@ -418,6 +445,16 @@ static ApplyResult apply_internal(Server *s,
     auto t_repl = clock_type::now();
     const int64_t pre_repl_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
         t_repl - t_enter).count();
+#endif
+#if RAFT_TIMING
+    if (diag_normal && pre_repl_ns - nvme_ns >= 1000000) {
+        std::fprintf(stderr, "[NORMAL-SLOW] apply ts_ns=%lld index=%llu batch=%zu pre_repl_us=%.3f lhandler_us=%.3f queue_us=%.3f initial_lock_us=%.3f batch_us=%.3f prepare_us=%.3f io_wall_us=%.3f relock_us=%.3f ring_wait_us=%.3f header_us=%.3f persist_us=%.3f publish_us=%.3f\n",
+            (long long)std::chrono::duration_cast<std::chrono::nanoseconds>(t_repl.time_since_epoch()).count(),
+            (unsigned long long)diag_index, diag_batch_size, pre_repl_ns/1000.0, (pre_repl_ns-nvme_ns)/1000.0,
+            diag_queue_ns/1000.0, diag_lock_ns/1000.0, diag_batch_ns/1000.0, req.prepare_ns/1000.0,
+            req.io_wall_ns/1000.0, req.relock_ns/1000.0, req.ring_wait_ns/1000.0, req.header_ns/1000.0,
+            nvme_ns/1000.0, diag_publish_ns/1000.0);
+    }
 #endif
     s->append_entries(sink);   /* shared_ptr 복사가 워커에게 전달된다 */
 
