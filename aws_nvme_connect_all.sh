@@ -58,10 +58,23 @@ for id in $NODES; do
         echo "Already connected: $nqn -> $expected"
     else
         echo "Connecting $nqn -> $expected"
-        nvme connect -t tcp -a "$target" -s "$NVME_PORT" -n "$nqn"
+        nvme connect -t tcp -a "$target" -s "$NVME_PORT" -n "$nqn" --disable-sqflow
         udevadm settle 2>/dev/null || true
     fi
-    dev="$(dev_for_nqn "$nqn")" || exit 1
+    dev=""
+    for attempt in {1..20}; do
+        if dev="$(dev_for_nqn "$nqn" 2>/dev/null)" && [[ -b "$dev" ]]; then
+            break
+        fi
+        dev=""
+        sleep 0.5
+    done
+
+    [[ -n "$dev" ]] || {
+        echo "ERROR: $nqn namespace not ready after 10 seconds" >&2
+        nvme list-subsys >&2
+        exit 1
+    }
     echo "$nqn -> $dev"
 done
 echo 'NVMe/TCP connection check completed'
