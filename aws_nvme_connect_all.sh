@@ -58,7 +58,7 @@ for id in $NODES; do
         echo "Already connected: $nqn -> $expected"
     else
         echo "Connecting $nqn -> $expected"
-        nvme connect -t tcp -a "$target" -s "$NVME_PORT" -n "$nqn" --disable-sqflow
+        nvme connect -t tcp -a "$target" -s "$NVME_PORT" -n "$nqn"
         udevadm settle 2>/dev/null || true
     fi
     dev=""
