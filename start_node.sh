@@ -256,6 +256,7 @@ echo "nvme        : $(nvme_desc_for_id "$ID")"
 echo "ring-pages  : $RING_PAGES"
 echo "precondition: $RING_PRECONDITION"
 echo "heartbeat   : $HEARTBEAT_MS ms"
+echo "loop_sleep  : $LOOP_SLEEP_US us"
 echo "ae-batch    : $AE_BATCH"
 echo "numa bind   : $NUMA_DESC"
 echo "io cpus     : $IO_DESC"
@@ -312,7 +313,7 @@ sudo "${LIB_PREFIX[@]}" "${NUMA_PREFIX[@]}" stdbuf -oL -eL "$NODE_BIN" \
     "${PUSH_ARGS[@]}" \
     "${IO_ARGS[@]}" \
     -heartbeat-ms "$HEARTBEAT_MS" \
-    -loop-sleep-us 200 \
+    -loop-sleep-us "$LOOP_SLEEP_US" \
     -ae-batch 256 \
     -gc-max-reqs 64 \
     -gc-max-bytes "$MAX_GC_BYTES" \
