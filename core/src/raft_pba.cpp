@@ -3,6 +3,8 @@
 #include "raft_basics.h"
 #include "cached_fd.h"   /* CachedFD 역참조 */
 #include <cstring>
+#include <chrono>
+#include <cstdio>
 
 namespace nvmeof_raft {
 
@@ -48,8 +50,24 @@ Server::PbaRangeResult Server::leader_pba_for_range(uint64_t start_slot, uint64_
  * deferred entry(Command=nil)를 실제로 로드할 때도 사용.
  * ============================================================ */
 Server::ReadEntryResult Server::read_entry_direct(uint64_t header_slot) {
+    using Clock = std::chrono::steady_clock;
+    auto report = [header_slot](uint64_t slot, uint64_t ordinal,
+                               uint64_t pba, Clock::time_point begin,
+                               Clock::time_point mapped, Clock::time_point done) {
+        const double map_us = std::chrono::duration<double, std::micro>(mapped - begin).count();
+        const double read_us = std::chrono::duration<double, std::micro>(done - mapped).count();
+        if (map_us >= 1000.0 || read_us >= 1000.0) {
+            std::fprintf(stderr, "[READBACK-IO-SLOW] header_slot=%llu slot=%llu ordinal=%llu aligned_pba=%llu map_us=%.3f read_us=%.3f\n",
+                         static_cast<unsigned long long>(header_slot),
+                         static_cast<unsigned long long>(slot),
+                         static_cast<unsigned long long>(ordinal),
+                         static_cast<unsigned long long>(pba), map_us, read_us);
+        }
+    };
     int64_t logical_off = slot_offset(header_slot);
+    const auto begin = Clock::now();
     PBASegment seg = io.cached_fd->get_pba(logical_off, SECTOR_SIZE);
+    const auto mapped = Clock::now();
     uint64_t raw_pba = seg.pba;
 
     /* "Align PBA down to 4KB boundary for O_DIRECT" */
@@ -57,6 +75,7 @@ Server::ReadEntryResult Server::read_entry_direct(uint64_t header_slot) {
     int64_t offset_in_page = static_cast<int64_t>(raw_pba - aligned_pba);
 
     std::vector<uint8_t> buf = io.cached_fd->read(aligned_pba, PAGE_SIZE);
+    report(header_slot, 0, aligned_pba, begin, mapped, Clock::now());
 
     /* "Parse header at the correct offset within the 4KB block" */
     const uint8_t *header = buf.data() + offset_in_page;
@@ -86,12 +105,15 @@ Server::ReadEntryResult Server::read_entry_direct(uint64_t header_slot) {
         for (uint64_t i = 1; i < num_slots && copied < cmd_len; i++) {
             uint64_t p_slot = (header_slot + i) % ring.ring_slots;
             int64_t p_off = slot_offset(p_slot);
+            const auto p_begin = Clock::now();
             PBASegment p_seg = io.cached_fd->get_pba(p_off, SECTOR_SIZE);
+            const auto p_mapped = Clock::now();
             uint64_t p_raw_pba = p_seg.pba;
             uint64_t p_aligned_pba = p_raw_pba & ~(PAGE_SIZE - 1);
             int64_t p_off_in_page = static_cast<int64_t>(p_raw_pba - p_aligned_pba);
 
             std::vector<uint8_t> p_buf = io.cached_fd->read(p_aligned_pba, PAGE_SIZE);
+            report(p_slot, i, p_aligned_pba, p_begin, p_mapped, Clock::now());
             size_t chunk = SECTOR_SIZE;
             if (copied + chunk > cmd_len) {
                 chunk = cmd_len - copied;
